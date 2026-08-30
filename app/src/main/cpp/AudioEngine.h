@@ -11,6 +11,8 @@
 enum SoundType {
     SOUND_TAP_BLUE,
     SOUND_TAP_RED,
+    SOUND_TAP_GREEN,
+    SOUND_TAP_YELLOW,
     SOUND_TAP_WHITE,
     SOUND_BEEP,
     SOUND_GO
@@ -43,7 +45,7 @@ public:
         std::lock_guard<std::mutex> lock(audioMutex_);
         ActiveSound s;
         s.time = 0.0f;
-        s.duration = 0.08f; // 80 ms pop
+        s.duration = 0.08f;
         s.phase = 0.0f;
         s.active = true;
 
@@ -55,7 +57,15 @@ public:
             s.type = SOUND_TAP_RED;
             s.startFreq = 850.0f;
             s.endFreq = 380.0f;
-        } else { // White
+        } else if (state == 3) { // Green (Future ready)
+            s.type = SOUND_TAP_GREEN;
+            s.startFreq = 1050.0f;
+            s.endFreq = 480.0f;
+        } else if (state == 4) { // Yellow (Future ready)
+            s.type = SOUND_TAP_YELLOW;
+            s.startFreq = 1250.0f;
+            s.endFreq = 620.0f;
+        } else { // White (0)
             s.type = SOUND_TAP_WHITE;
             s.startFreq = 480.0f;
             s.endFreq = 200.0f;
@@ -69,8 +79,8 @@ public:
         ActiveSound s;
         s.type = SOUND_BEEP;
         s.time = 0.0f;
-        s.duration = 0.12f; // 120 ms synth beep
-        s.startFreq = 523.25f; // C5 note
+        s.duration = 0.12f;
+        s.startFreq = 523.25f; // C5
         s.endFreq = 523.25f;
         s.phase = 0.0f;
         s.active = true;
@@ -79,7 +89,6 @@ public:
 
     void playGoChime() {
         std::lock_guard<std::mutex> lock(audioMutex_);
-        // Ascending chord chime
         ActiveSound s1;
         s1.type = SOUND_GO;
         s1.time = 0.0f;
@@ -164,30 +173,25 @@ private:
                 }
 
                 float tRatio = s.time / s.duration;
-                // Frequency linear sweep
                 float currentFreq = s.startFreq + tRatio * (s.endFreq - s.startFreq);
 
-                // Exponential decay amplitude envelope
                 float envelope = std::pow(1.0f - tRatio, 2.0f);
                 if (s.type == SOUND_BEEP || s.type == SOUND_GO) {
                     envelope = std::pow(1.0f - tRatio, 1.5f);
                 }
 
-                // Sine wave synthesis
                 float sample = std::sin(s.phase) * envelope * 0.35f;
 
                 s.phase += 2.0f * 3.14159265f * currentFreq * dt;
                 if (s.phase > 2.0f * 3.14159265f) s.phase -= 2.0f * 3.14159265f;
 
-                // Output to stereo channels
-                output[i * 2 + 0] += sample; // Left channel
-                output[i * 2 + 1] += sample; // Right channel
+                output[i * 2 + 0] += sample;
+                output[i * 2 + 1] += sample;
 
                 s.time += dt;
             }
         }
 
-        // Remove finished sounds
         sounds_.erase(
             std::remove_if(sounds_.begin(), sounds_.end(),
                            [](const ActiveSound& s) { return !s.active; }),

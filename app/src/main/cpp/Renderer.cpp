@@ -10,6 +10,7 @@
 #include "Utility.h"
 #include "MatrixMath.h"
 #include "TextureAsset.h"
+#include "VibrationEngine.h"
 
 static const char *vertex = R"vertex(#version 300 es
 in vec3 inPosition;
@@ -124,7 +125,6 @@ void Renderer::render() {
 
     gameUI_.update(dt, &audioEngine_);
 
-    // Rotate board smoothly when match timer <= 15s
     if (gameUI_.getState() == GameState::PLAYING) {
         float remainingTime = gameUI_.getMatchTimer();
         if (remainingTime <= 15.0f) {
@@ -148,7 +148,7 @@ void Renderer::render() {
     if (shader_) {
         shader_->activate();
 
-        // 0. Render Background Image Quad (No depth testing)
+        // 0. Render Background Image Quad
         glDisable(GL_DEPTH_TEST);
         renderBackground();
 
@@ -157,7 +157,7 @@ void Renderer::render() {
         glDepthFunc(GL_LESS);
         cubeGrid_.render(*shader_, viewProj);
 
-        // Draw 3D particle waves (with alpha blending)
+        // Draw 3D particle waves
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         particleSystem_.render(*shader_, viewProj);
@@ -292,8 +292,13 @@ void Renderer::handleInput() {
                         Vec3 cubePos;
                         CubeState newState;
                         if (cubeGrid_.tapCube(pickedCube, cubePos, newState)) {
+                            // Play procedural tap sound
                             audioEngine_.playTapSound(static_cast<int>(newState));
 
+                            // Trigger haptic vibration for device
+                            VibrationEngine::triggerVibration(app_, static_cast<int>(newState));
+
+                            // Spawn particle shockwave wave
                             if (newState == CUBE_STATE_BLUE) {
                                 particleSystem_.spawnWave(cubePos, 0.05f, 0.55f, 1.0f);
                             } else if (newState == CUBE_STATE_RED) {

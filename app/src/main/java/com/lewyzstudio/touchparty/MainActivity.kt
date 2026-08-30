@@ -1,7 +1,11 @@
 package com.lewyzstudio.touchparty
 
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -15,11 +19,51 @@ class MainActivity : GameActivity() {
         }
     }
 
+    private var vibrator: Vibrator? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+    }
+
+    fun triggerVibration(colorState: Int) {
+        val vib = vibrator ?: return
+        if (!vib.hasVibrator()) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val effect = when (colorState) {
+                0 -> VibrationEffect.createOneShot(15L, VibrationEffect.DEFAULT_AMPLITUDE)
+                1 -> VibrationEffect.createWaveform(longArrayOf(0, 20, 20, 25), -1)
+                2 -> VibrationEffect.createWaveform(longArrayOf(0, 45, 25, 45), -1)
+                3 -> VibrationEffect.createWaveform(longArrayOf(0, 15, 15, 15, 15, 20), -1)
+                4 -> VibrationEffect.createWaveform(longArrayOf(0, 75), -1)
+                else -> VibrationEffect.createOneShot(20L, VibrationEffect.DEFAULT_AMPLITUDE)
+            }
+            vib.vibrate(effect)
+        } else {
+            @Suppress("DEPRECATION")
+            val ms = when (colorState) {
+                0 -> 15L
+                1 -> 35L
+                2 -> 60L
+                3 -> 40L
+                4 -> 75L
+                else -> 20L
+            }
+            @Suppress("DEPRECATION")
+            vib.vibrate(ms)
         }
     }
 
