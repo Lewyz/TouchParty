@@ -87,7 +87,6 @@ void Renderer::render() {
     float proj[16], view[16], viewProj[16];
     computeCameraMatrices(float(width_), float(height_), proj, view, viewProj);
 
-    // Dark tech background
     glClearColor(0.07f, 0.09f, 0.13f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -209,9 +208,16 @@ void Renderer::handleInput() {
 
         int actionMasked = action & AMOTION_EVENT_ACTION_MASK;
         if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
-            // 1. Try handling touch on 2D Game UI (Play button)
-            if (gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_)) {
-                // UI consumed touch
+            // 1. Try handling touch on 2D Game UI (Play or Reset button)
+            TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_);
+
+            if (uiAction == TouchAction::RESET) {
+                cubeGrid_.reset();
+                particleSystem_.clear();
+                gameUI_.setState(GameState::MENU);
+                audioEngine_.playGoChime();
+            } else if (uiAction == TouchAction::PLAY) {
+                // Play button consumed touch
             } else if (gameUI_.getState() == GameState::PLAYING) {
                 // 2. Unproject screen touch to 3D ray for Cube Picking
                 float proj[16], view[16], viewProj[16], invViewProj[16];
@@ -226,10 +232,8 @@ void Renderer::handleInput() {
                         Vec3 cubePos;
                         CubeState newState;
                         if (cubeGrid_.tapCube(pickedCube, cubePos, newState)) {
-                            // Play procedural tap sound!
                             audioEngine_.playTapSound(static_cast<int>(newState));
 
-                            // Spawn particle shockwave wave
                             if (newState == CUBE_STATE_BLUE) {
                                 particleSystem_.spawnWave(cubePos, 0.05f, 0.55f, 1.0f);
                             } else if (newState == CUBE_STATE_RED) {

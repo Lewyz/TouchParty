@@ -24,19 +24,22 @@ public:
         initRingGeometry();
     }
 
+    void clear() {
+        particles_.clear();
+    }
+
     void spawnWave(const Vec3& center, float r, float g, float b) {
-        // Spawn 2 expanding rings/burst particles
         for (int i = 0; i < 2; ++i) {
             Particle p;
             p.pos = center;
-            p.pos.y += 0.05f + i * 0.02f; // slightly above grid floor
+            p.pos.y += 0.05f + static_cast<float>(i) * 0.02f;
             p.r = r;
             p.g = g;
             p.b = b;
-            p.currentRadius = 0.3f + i * 0.1f;
-            p.maxRadius = 1.6f + i * 0.4f;
+            p.currentRadius = 0.3f + static_cast<float>(i) * 0.1f;
+            p.maxRadius = 1.6f + static_cast<float>(i) * 0.4f;
             p.age = 0.0f;
-            p.maxAge = 0.45f + i * 0.1f;
+            p.maxAge = 0.45f + static_cast<float>(i) * 0.1f;
             p.active = true;
             particles_.push_back(p);
         }
@@ -54,7 +57,6 @@ public:
             }
         }
 
-        // Clean up inactive particles
         particles_.erase(
             std::remove_if(particles_.begin(), particles_.end(),
                            [](const Particle& p) { return !p.active; }),
@@ -107,16 +109,14 @@ private:
             float cosA = std::cos(angle);
             float sinA = std::sin(angle);
 
-            // Inner vertex
             vertices_.emplace_back(Vector3{innerR * cosA, 0.0f, innerR * sinA}, Vector2{0, 0});
-            // Outer vertex
             vertices_.emplace_back(Vector3{outerR * cosA, 0.0f, outerR * sinA}, Vector2{1, 0});
 
             int next = (i + 1) % SEGMENTS;
-            uint16_t i0 = i * 2;
-            uint16_t i1 = i * 2 + 1;
-            uint16_t i2 = next * 2;
-            uint16_t i3 = next * 2 + 1;
+            uint16_t i0 = static_cast<uint16_t>(i * 2);
+            uint16_t i1 = static_cast<uint16_t>(i * 2 + 1);
+            uint16_t i2 = static_cast<uint16_t>(next * 2);
+            uint16_t i3 = static_cast<uint16_t>(next * 2 + 1);
 
             indices_.push_back(i0); indices_.push_back(i1); indices_.push_back(i2);
             indices_.push_back(i1); indices_.push_back(i3); indices_.push_back(i2);

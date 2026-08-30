@@ -16,6 +16,12 @@ enum class GameState {
     PLAYING
 };
 
+enum class TouchAction {
+    NONE,
+    PLAY,
+    RESET
+};
+
 class GameUI {
 public:
     GameUI() : state_(GameState::MENU), countdownTimer_(0.0f), uiCubeRot_(0.0f), lastCountdownSec_(-1) {
@@ -56,20 +62,33 @@ public:
         }
     }
 
-    bool handleTouch(float screenX, float screenY, float width, float height, AudioEngine* audioEngine = nullptr) {
-        if (state_ == GameState::MENU) {
-            float aspect = width / height;
-            float normX = ((2.0f * screenX) / width - 1.0f) * aspect;
-            float normY = 1.0f - (2.0f * screenY) / height;
+    TouchAction handleTouch(float screenX, float screenY, float width, float height, AudioEngine* audioEngine = nullptr) {
+        float aspect = width / height;
+        float normX = ((2.0f * screenX) / width - 1.0f) * aspect;
+        float normY = 1.0f - (2.0f * screenY) / height;
 
+        // 1. Check Reset Button (Top-Left below Red score panel)
+        float resetX = -aspect + 0.28f;
+        float resetY = 0.65f;
+        float resetW = 0.38f;
+        float resetH = 0.14f;
+
+        if (std::abs(normX - resetX) <= resetW * 0.5f + 0.03f &&
+            std::abs(normY - resetY) <= resetH * 0.5f + 0.03f) {
+            return TouchAction::RESET;
+        }
+
+        // 2. Check Play Button (Only active in MENU state)
+        if (state_ == GameState::MENU) {
             float dx = normX - 0.0f;
             float dy = normY - (-0.1f);
             if (dx * dx + dy * dy <= 0.25f * 0.25f) {
                 startCountdown(audioEngine);
-                return true;
+                return TouchAction::PLAY;
             }
         }
-        return false;
+
+        return TouchAction::NONE;
     }
 
     void render(const Shader& shader, float width, float height, int redCount, int blueCount) const {
@@ -79,7 +98,7 @@ public:
 
         shader.setUseTexture(false);
 
-        // 1. Top Side Panels with 3D Mini-Cubes
+        // 1. Top Side Panels & Reset Button
         renderTopScorePanels(shader, ortho, aspect, redCount, blueCount);
 
         // 2. Render State Specific UI
@@ -103,12 +122,78 @@ private:
         draw3DMiniCube(shader, ortho, redX - panelW * 0.30f, panelY, 1.0f, 0.22f, 0.22f);
         drawDigits(shader, ortho, redX + 0.04f, panelY, redCount, 1.0f, 0.35f, 0.35f);
 
+        // Reset Button (Left side, directly below RED Score Panel)
+        float resetX = -aspect + 0.28f;
+        float resetY = 0.65f;
+        float resetW = 0.38f;
+        float resetH = 0.14f;
+
+        drawQuad(shader, ortho, resetX, resetY, resetW, resetH, 0.14f, 0.18f, 0.25f, 0.92f);
+        drawQuad(shader, ortho, resetX, resetY - resetH * 0.5f, resetW, 0.01f, 0.4f, 0.7f, 1.0f, 0.95f);
+        drawTextRESET(shader, ortho, resetX, resetY, 0.075f, 0.9f, 0.95f, 1.0f, 1.0f);
+
         // Top-Right Panel (BLUE Score)
         float blueX = aspect - panelW * 0.5f - 0.06f;
         drawQuad(shader, ortho, blueX, panelY, panelW, panelH, 0.12f, 0.15f, 0.22f, 0.92f);
         drawQuad(shader, ortho, blueX, panelY - panelH * 0.5f, panelW, 0.01f, 0.05f, 0.55f, 1.0f, 0.95f);
         draw3DMiniCube(shader, ortho, blueX - panelW * 0.30f, panelY, 0.05f, 0.55f, 1.0f);
         drawDigits(shader, ortho, blueX + 0.04f, panelY, blueCount, 0.25f, 0.68f, 1.0f);
+    }
+
+    void drawTextRESET(const Shader& shader, const float* ortho, float cx, float cy, float size,
+                       float r, float g, float b, float a) const {
+        float spacing = size * 0.65f;
+        float startX = cx - spacing * 2.0f;
+
+        drawCharR(shader, ortho, startX + spacing * 0.0f, cy, size, r, g, b, a);
+        drawCharE(shader, ortho, startX + spacing * 1.0f, cy, size, r, g, b, a);
+        drawCharS(shader, ortho, startX + spacing * 2.0f, cy, size, r, g, b, a);
+        drawCharE(shader, ortho, startX + spacing * 3.0f, cy, size, r, g, b, a);
+        drawCharT(shader, ortho, startX + spacing * 4.0f, cy, size, r, g, b, a);
+    }
+
+    void drawCharR(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);              // left stem
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);                           // top
+        drawQuad(shader, ortho, x + w * 0.5f, y + h * 0.5f, t, h, r, g, b, a);         // top-right
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);                               // mid shelf
+        drawQuad(shader, ortho, x + w * 0.25f, y - h * 0.5f, t, h, r, g, b, a);        // leg
+    }
+
+    void drawCharE(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);              // left stem
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);                           // top
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);                               // mid
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);                           // bottom
+    }
+
+    void drawCharS(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);                           // top
+        drawQuad(shader, ortho, x - w * 0.5f, y + h * 0.5f, t, h, r, g, b, a);         // top-left
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);                               // mid
+        drawQuad(shader, ortho, x + w * 0.5f, y - h * 0.5f, t, h, r, g, b, a);         // bot-right
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);                           // bottom
+    }
+
+    void drawCharT(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x, y + h, w * 1.2f, t, r, g, b, a);                    // top bar
+        drawQuad(shader, ortho, x, y, t, h * 2.0f, r, g, b, a);                         // center stem
     }
 
     void draw3DMiniCube(const Shader& shader, const float* ortho, float cx, float cy, float r, float g, float b) const {
