@@ -35,7 +35,7 @@ public:
     static constexpr float CUBE_SIZE = 0.72f;
     static constexpr float GRID_SPACING = 0.90f;
 
-    CubeGrid() : blueCount_(0), redCount_(0) {
+    CubeGrid() : boardRotationY_(0.0f), blueCount_(0), redCount_(0) {
         initGeometry();
         initPlatformGeometry();
         initGrid();
@@ -44,6 +44,7 @@ public:
     void reset() {
         blueCount_ = 0;
         redCount_ = 0;
+        boardRotationY_ = 0.0f;
         for (auto& cube : cubes_) {
             cube.state = CUBE_STATE_WHITE;
             cube.jumpTime = 0.0f;
@@ -51,6 +52,9 @@ public:
             cube.rotAngle = 0.0f;
         }
     }
+
+    void setBoardRotationY(float angle) { boardRotationY_ = angle; }
+    float getBoardRotationY() const { return boardRotationY_; }
 
     void update(float deltaTime) {
         for (auto& cube : cubes_) {
@@ -69,6 +73,23 @@ public:
     }
 
     int pickCube(const Vec3& rayOrigin, const Vec3& rayDir) const {
+        // Inverse rotate the incoming ray by -boardRotationY_ around Y axis
+        float negRad = degToRad(-boardRotationY_);
+        float cosA = std::cos(negRad);
+        float sinA = std::sin(negRad);
+
+        Vec3 localRayOrigin(
+            rayOrigin.x * cosA + rayOrigin.z * sinA,
+            rayOrigin.y,
+            -rayOrigin.x * sinA + rayOrigin.z * cosA
+        );
+
+        Vec3 localRayDir(
+            rayDir.x * cosA + rayDir.z * sinA,
+            rayDir.y,
+            -rayDir.x * sinA + rayDir.z * cosA
+        );
+
         int bestIndex = -1;
         float minT = 1e9f;
         float hSize = CUBE_SIZE * 0.5f;
@@ -82,7 +103,7 @@ public:
             Vec3 maxB(pos.x + hSize, pos.y + hSize, pos.z + hSize);
 
             float t = 0.0f;
-            if (MatrixMath::rayAABBIntersection(rayOrigin, rayDir, minB, maxB, t)) {
+            if (MatrixMath::rayAABBIntersection(localRayOrigin, localRayDir, minB, maxB, t)) {
                 if (t < minT) {
                     minT = t;
                     bestIndex = i;
@@ -109,8 +130,19 @@ public:
         }
 
         cube.jumpTime = 0.001f;
-        outPos = cube.basePos;
-        outPos.y += cube.yOffset;
+
+        // Transform cube base position by board rotation to get world position for particle effects
+        float rad = degToRad(boardRotationY_);
+        float c = std::cos(rad);
+        float s = std::sin(rad);
+
+        Vec3 pos = cube.basePos;
+        pos.y += cube.yOffset;
+
+        outPos.x = pos.x * c - pos.z * s;
+        outPos.y = pos.y;
+        outPos.z = pos.x * s + pos.z * c;
+
         outState = cube.state;
         return true;
     }
@@ -125,6 +157,10 @@ public:
         for (const auto& cube : cubes_) {
             float model[16];
             MatrixMath::identity(model);
+
+            if (boardRotationY_ > 0.0f) {
+                MatrixMath::rotateY(model, degToRad(boardRotationY_));
+            }
 
             Vec3 currentPos = cube.basePos;
             currentPos.y += cube.yOffset;
@@ -167,13 +203,17 @@ private:
     void renderPlatform(const Shader& shader, const float* viewProjMatrix) const {
         float model[16];
         MatrixMath::identity(model);
+
+        if (boardRotationY_ > 0.0f) {
+            MatrixMath::rotateY(model, degToRad(boardRotationY_));
+        }
+
         MatrixMath::translate(model, 0.0f, -0.55f, 0.0f);
 
         float mvp[16];
         MatrixMath::multiply(mvp, viewProjMatrix, model);
         shader.setProjectionMatrix(mvp);
 
-        // Render platform faces with metallic steel-blue tint matching background_cubes.jpeg
         float r = 0.35f, g = 0.40f, b = 0.46f;
         for (size_t f = 0; f < platformFaceCount_; ++f) {
             float shade = platformFaceShades_[f];
@@ -278,6 +318,7 @@ private:
         platformFaceShades_.push_back(shade);
     }
 
+    float boardRotationY_;
     std::vector<CubeData> cubes_;
     std::vector<Vertex> vertices_;
     std::vector<uint16_t> indices_;

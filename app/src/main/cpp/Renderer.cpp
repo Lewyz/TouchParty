@@ -123,6 +123,19 @@ void Renderer::render() {
     if (dt > 0.1f) dt = 0.1f;
 
     gameUI_.update(dt, &audioEngine_);
+
+    // Rotate board smoothly when match timer <= 15s
+    if (gameUI_.getState() == GameState::PLAYING) {
+        float remainingTime = gameUI_.getMatchTimer();
+        if (remainingTime <= 15.0f) {
+            float rot = cubeGrid_.getBoardRotationY() + dt * 22.0f;
+            if (rot >= 360.0f) rot -= 360.0f;
+            cubeGrid_.setBoardRotationY(rot);
+        }
+    } else if (gameUI_.getState() == GameState::MENU) {
+        cubeGrid_.setBoardRotationY(0.0f);
+    }
+
     cubeGrid_.update(dt);
     particleSystem_.update(dt);
 
@@ -215,7 +228,6 @@ void Renderer::initRenderer() {
             Shader::loadShader(vertex, fragment, "inPosition", "inUV", "uProjection", "uColor", "uUseTexture"));
     assert(shader_);
 
-    // Load background_cubes.jpeg texture from assets
     auto assetManager = app_->activity->assetManager;
     bgTexture_ = TextureAsset::loadAsset(assetManager, "background_cubes.jpeg");
 
@@ -262,10 +274,10 @@ void Renderer::handleInput() {
             if (uiAction == TouchAction::RESET) {
                 cubeGrid_.reset();
                 particleSystem_.clear();
-                gameUI_.setState(GameState::MENU);
                 audioEngine_.playGoChime();
             } else if (uiAction == TouchAction::PLAY) {
-                // Play button consumed touch
+                cubeGrid_.reset();
+                particleSystem_.clear();
             } else if (gameUI_.getState() == GameState::PLAYING) {
                 // 2. Unproject screen touch to 3D ray for Cube Picking
                 float proj[16], view[16], viewProj[16], invViewProj[16];

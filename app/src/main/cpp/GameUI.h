@@ -13,7 +13,8 @@
 enum class GameState {
     MENU,
     COUNTDOWN,
-    PLAYING
+    PLAYING,
+    MATCH_OVER
 };
 
 enum class TouchAction {
@@ -24,7 +25,7 @@ enum class TouchAction {
 
 class GameUI {
 public:
-    GameUI() : state_(GameState::MENU), countdownTimer_(0.0f), uiCubeRot_(0.0f), lastCountdownSec_(-1) {
+    GameUI() : state_(GameState::MENU), countdownTimer_(0.0f), matchTimer_(30.0f), uiCubeRot_(0.0f), lastCountdownSec_(-1) {
         initQuadGeometry();
         initMiniCubeGeometry();
     }
@@ -32,9 +33,13 @@ public:
     GameState getState() const { return state_; }
     void setState(GameState state) { state_ = state; }
 
+    float getMatchTimer() const { return matchTimer_; }
+    void setMatchTimer(float t) { matchTimer_ = t; }
+
     void startCountdown(AudioEngine* audioEngine = nullptr) {
         state_ = GameState::COUNTDOWN;
         countdownTimer_ = 0.0f;
+        matchTimer_ = 30.0f;
         lastCountdownSec_ = -1;
         if (audioEngine) audioEngine->playCountdownBeep();
     }
@@ -58,6 +63,14 @@ public:
 
             if (countdownTimer_ >= 4.0f) {
                 state_ = GameState::PLAYING;
+                matchTimer_ = 30.0f;
+            }
+        } else if (state_ == GameState::PLAYING) {
+            matchTimer_ -= deltaTime;
+            if (matchTimer_ <= 0.0f) {
+                matchTimer_ = 0.0f;
+                state_ = GameState::MATCH_OVER;
+                if (audioEngine) audioEngine->playGoChime();
             }
         }
     }
@@ -75,6 +88,7 @@ public:
 
         if (std::abs(normX - resetX) <= resetW * 0.5f + 0.03f &&
             std::abs(normY - resetY) <= resetH * 0.5f + 0.03f) {
+            matchTimer_ = 30.0f;
             return TouchAction::RESET;
         }
 
@@ -85,6 +99,18 @@ public:
             if (dx * dx + dy * dy <= 0.25f * 0.25f) {
                 startCountdown(audioEngine);
                 return TouchAction::PLAY;
+            }
+        } else if (state_ == GameState::MATCH_OVER) {
+            // Check "PLAY AGAIN" Button in center card
+            float playAgainX = 0.0f;
+            float playAgainY = -0.20f;
+            float playAgainW = 0.55f;
+            float playAgainH = 0.16f;
+
+            if (std::abs(normX - playAgainX) <= playAgainW * 0.5f + 0.04f &&
+                std::abs(normY - playAgainY) <= playAgainH * 0.5f + 0.04f) {
+                startCountdown(audioEngine);
+                return TouchAction::RESET;
             }
         }
 
@@ -98,18 +124,246 @@ public:
 
         shader.setUseTexture(false);
 
-        // 1. Top Side Panels & Reset Button
+        // 1. Top Side Panels, Reset Button & Center Match Timer Display
         renderTopScorePanels(shader, ortho, aspect, redCount, blueCount);
+        renderMatchTimerDisplay(shader, ortho);
 
         // 2. Render State Specific UI
         if (state_ == GameState::MENU) {
             renderPlayButton(shader, ortho);
         } else if (state_ == GameState::COUNTDOWN) {
             renderCountdown(shader, ortho);
+        } else if (state_ == GameState::MATCH_OVER) {
+            renderWinnerOverlay(shader, ortho, redCount, blueCount);
         }
     }
 
 private:
+    void renderMatchTimerDisplay(const Shader& shader, const float* ortho) const {
+        float timerX = 0.0f;
+        float timerY = 0.85f;
+        float timerW = 0.44f;
+        float timerH = 0.16f;
+
+        // Container panel
+        drawQuad(shader, ortho, timerX, timerY, timerW, timerH, 0.10f, 0.13f, 0.20f, 0.92f);
+
+        // Pulse color if time is low
+        float r = 0.1f, g = 0.9f, b = 1.0f;
+        if (matchTimer_ <= 10.0f) {
+            r = 1.0f; g = 0.3f; b = 0.2f;
+        }
+
+        drawQuad(shader, ortho, timerX, timerY - timerH * 0.5f, timerW, 0.01f, r, g, b, 0.95f);
+
+        // Render "00:XX"
+        int totalSec = std::max(0, static_cast<int>(std::ceil(matchTimer_)));
+        int mins = totalSec / 60;
+        int secs = totalSec % 60;
+
+        std::string timeStr = (mins < 10 ? "0" : "") + std::to_string(mins) + ":" + (secs < 10 ? "0" : "") + std::to_string(secs);
+
+        float charSpacing = 0.065f;
+        float startX = timerX - charSpacing * 2.1f;
+        for (char c : timeStr) {
+            if (c == ':') {
+                // Draw colon dots
+                drawQuad(shader, ortho, startX, timerY + 0.025f, 0.015f, 0.015f, r, g, b, 1.0f);
+                drawQuad(shader, ortho, startX, timerY - 0.025f, 0.015f, 0.015f, r, g, b, 1.0f);
+            } else {
+                int digit = c - '0';
+                drawSingleDigit(shader, ortho, startX, timerY, digit, 0.075f, r, g, b, 1.0f);
+            }
+            startX += charSpacing;
+        }
+    }
+
+    void renderWinnerOverlay(const Shader& shader, const float* ortho, int redCount, int blueCount) const {
+        float cx = 0.0f;
+        float cy = 0.05f;
+        float cardW = 1.20f;
+        float cardH = 0.75f;
+
+        // Backdrop card
+        drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.09f, 0.12f, 0.17f, 0.95f);
+        drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.012f, 0.4f, 0.7f, 1.0f, 0.95f);
+        drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.012f, 0.4f, 0.7f, 1.0f, 0.95f);
+
+        // Winner Text
+        float textY = cy + 0.20f;
+        if (redCount > blueCount) {
+            drawTextREDWINS(shader, ortho, cx, textY, 0.08f, 1.0f, 0.25f, 0.25f, 1.0f);
+        } else if (blueCount > redCount) {
+            drawTextBLUEWINS(shader, ortho, cx, textY, 0.08f, 0.1f, 0.65f, 1.0f, 1.0f);
+        } else {
+            drawTextDRAW(shader, ortho, cx, textY, 0.085f, 1.0f, 0.9f, 0.2f, 1.0f);
+        }
+
+        // Final Score Summary Text: RED: X | BLUE: Y
+        float scoreY = cy + 0.02f;
+        drawDigits(shader, ortho, cx - 0.22f, scoreY, redCount, 1.0f, 0.35f, 0.35f);
+        drawQuad(shader, ortho, cx, scoreY, 0.01f, 0.08f, 0.5f, 0.5f, 0.6f, 0.8f);
+        drawDigits(shader, ortho, cx + 0.12f, scoreY, blueCount, 0.25f, 0.68f, 1.0f);
+
+        // "PLAY AGAIN" Button
+        float btnX = cx;
+        float btnY = cy - 0.20f;
+        float btnW = 0.55f;
+        float btnH = 0.16f;
+
+        drawQuad(shader, ortho, btnX, btnY, btnW, btnH, 0.12f, 0.45f, 0.90f, 0.95f);
+        drawQuad(shader, ortho, btnX, btnY - btnH * 0.5f, btnW, 0.01f, 0.6f, 0.85f, 1.0f, 0.95f);
+        drawTextAGAIN(shader, ortho, btnX, btnY, 0.075f, 1.0f, 1.0f, 1.0f, 1.0f);
+    }
+
+    void drawTextREDWINS(const Shader& shader, const float* ortho, float cx, float cy, float size, float r, float g, float b, float a) const {
+        float sp = size * 0.65f;
+        float x = cx - sp * 3.5f;
+
+        drawCharR(shader, ortho, x + sp * 0.0f, cy, size, r, g, b, a);
+        drawCharE(shader, ortho, x + sp * 1.0f, cy, size, r, g, b, a);
+        drawCharD(shader, ortho, x + sp * 2.0f, cy, size, r, g, b, a);
+
+        // Space
+        x += sp * 0.8f;
+        drawCharW(shader, ortho, x + sp * 3.0f, cy, size, r, g, b, a);
+        drawCharI(shader, ortho, x + sp * 4.0f, cy, size, r, g, b, a);
+        drawCharN(shader, ortho, x + sp * 5.0f, cy, size, r, g, b, a);
+        drawCharS(shader, ortho, x + sp * 6.0f, cy, size, r, g, b, a);
+    }
+
+    void drawTextBLUEWINS(const Shader& shader, const float* ortho, float cx, float cy, float size, float r, float g, float b, float a) const {
+        float sp = size * 0.65f;
+        float x = cx - sp * 4.0f;
+
+        drawCharB(shader, ortho, x + sp * 0.0f, cy, size, r, g, b, a);
+        drawCharL(shader, ortho, x + sp * 1.0f, cy, size, r, g, b, a);
+        drawCharU(shader, ortho, x + sp * 2.0f, cy, size, r, g, b, a);
+        drawCharE(shader, ortho, x + sp * 3.0f, cy, size, r, g, b, a);
+
+        // Space
+        x += sp * 0.8f;
+        drawCharW(shader, ortho, x + sp * 4.0f, cy, size, r, g, b, a);
+        drawCharI(shader, ortho, x + sp * 5.0f, cy, size, r, g, b, a);
+        drawCharN(shader, ortho, x + sp * 6.0f, cy, size, r, g, b, a);
+        drawCharS(shader, ortho, x + sp * 7.0f, cy, size, r, g, b, a);
+    }
+
+    void drawTextDRAW(const Shader& shader, const float* ortho, float cx, float cy, float size, float r, float g, float b, float a) const {
+        float sp = size * 0.65f;
+        float x = cx - sp * 1.5f;
+
+        drawCharD(shader, ortho, x + sp * 0.0f, cy, size, r, g, b, a);
+        drawCharR(shader, ortho, x + sp * 1.0f, cy, size, r, g, b, a);
+        drawCharA(shader, ortho, x + sp * 2.0f, cy, size, r, g, b, a);
+        drawCharW(shader, ortho, x + sp * 3.0f, cy, size, r, g, b, a);
+    }
+
+    void drawTextAGAIN(const Shader& shader, const float* ortho, float cx, float cy, float size, float r, float g, float b, float a) const {
+        float sp = size * 0.65f;
+        float x = cx - sp * 2.0f;
+
+        drawCharA(shader, ortho, x + sp * 0.0f, cy, size, r, g, b, a);
+        drawCharG(shader, ortho, x + sp * 1.0f, cy, size, r, g, b, a);
+        drawCharA(shader, ortho, x + sp * 2.0f, cy, size, r, g, b, a);
+        drawCharI(shader, ortho, x + sp * 3.0f, cy, size, r, g, b, a);
+        drawCharN(shader, ortho, x + sp * 4.0f, cy, size, r, g, b, a);
+    }
+
+    void drawCharB(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y + h * 0.5f, t, h, r, g, b, a);
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y - h * 0.5f, t, h, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
+    }
+
+    void drawCharD(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
+    }
+
+    void drawCharA(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);
+    }
+
+    void drawCharL(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
+    }
+
+    void drawCharU(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
+    }
+
+    void drawCharW(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h * 0.25f, t, h, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
+    }
+
+    void drawCharI(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x, y, t, h * 2.0f, r, g, b, a);
+    }
+
+    void drawCharN(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y + h * 0.25f, t, h, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+    }
+
+    void drawCharG(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
+        float w = size * 0.45f;
+        float h = size * 0.45f;
+        float t = size * 0.10f;
+
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y - h * 0.25f, t, h * 0.5f, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.25f, y, w * 0.5f, t, r, g, b, a);
+    }
+
     void renderTopScorePanels(const Shader& shader, const float* ortho, float aspect, int redCount, int blueCount) const {
         float panelY = 0.85f;
         float panelW = 0.52f;
@@ -157,11 +411,11 @@ private:
         float h = size * 0.45f;
         float t = size * 0.10f;
 
-        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);              // left stem
-        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);                           // top
-        drawQuad(shader, ortho, x + w * 0.5f, y + h * 0.5f, t, h, r, g, b, a);         // top-right
-        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);                               // mid shelf
-        drawQuad(shader, ortho, x + w * 0.25f, y - h * 0.5f, t, h, r, g, b, a);        // leg
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y + h * 0.5f, t, h, r, g, b, a);
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.25f, y - h * 0.5f, t, h, r, g, b, a);
     }
 
     void drawCharE(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
@@ -169,10 +423,10 @@ private:
         float h = size * 0.45f;
         float t = size * 0.10f;
 
-        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);              // left stem
-        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);                           // top
-        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);                               // mid
-        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);                           // bottom
+        drawQuad(shader, ortho, x - w * 0.5f, y, t, h * 2.0f, r, g, b, a);
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
     }
 
     void drawCharS(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
@@ -180,11 +434,11 @@ private:
         float h = size * 0.45f;
         float t = size * 0.10f;
 
-        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);                           // top
-        drawQuad(shader, ortho, x - w * 0.5f, y + h * 0.5f, t, h, r, g, b, a);         // top-left
-        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);                               // mid
-        drawQuad(shader, ortho, x + w * 0.5f, y - h * 0.5f, t, h, r, g, b, a);         // bot-right
-        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);                           // bottom
+        drawQuad(shader, ortho, x, y + h, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x - w * 0.5f, y + h * 0.5f, t, h, r, g, b, a);
+        drawQuad(shader, ortho, x, y, w, t, r, g, b, a);
+        drawQuad(shader, ortho, x + w * 0.5f, y - h * 0.5f, t, h, r, g, b, a);
+        drawQuad(shader, ortho, x, y - h, w, t, r, g, b, a);
     }
 
     void drawCharT(const Shader& shader, const float* ortho, float x, float y, float size, float r, float g, float b, float a) const {
@@ -192,8 +446,8 @@ private:
         float h = size * 0.45f;
         float t = size * 0.10f;
 
-        drawQuad(shader, ortho, x, y + h, w * 1.2f, t, r, g, b, a);                    // top bar
-        drawQuad(shader, ortho, x, y, t, h * 2.0f, r, g, b, a);                         // center stem
+        drawQuad(shader, ortho, x, y + h, w * 1.2f, t, r, g, b, a);
+        drawQuad(shader, ortho, x, y, t, h * 2.0f, r, g, b, a);
     }
 
     void draw3DMiniCube(const Shader& shader, const float* ortho, float cx, float cy, float r, float g, float b) const {
@@ -441,6 +695,7 @@ private:
 
     GameState state_;
     float countdownTimer_;
+    float matchTimer_;
     float uiCubeRot_;
     int lastCountdownSec_;
     std::vector<Vertex> quadVertices_;
