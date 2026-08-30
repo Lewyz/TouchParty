@@ -10,6 +10,7 @@
 #include "ParticleSystem.h"
 #include "GameUI.h"
 #include "AudioEngine.h"
+#include "TextureAsset.h"
 
 struct android_app;
 
@@ -35,6 +36,7 @@ public:
 private:
     void initRenderer();
     void updateRenderArea();
+    void renderBackground();
 
     android_app *app_;
     EGLDisplay display_;
@@ -46,6 +48,7 @@ private:
     bool shaderNeedsNewProjectionMatrix_;
 
     std::unique_ptr<Shader> shader_;
+    std::shared_ptr<TextureAsset> bgTexture_;
     CubeGrid cubeGrid_;
     ParticleSystem particleSystem_;
     GameUI gameUI_;

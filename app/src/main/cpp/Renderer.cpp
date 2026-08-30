@@ -9,6 +9,7 @@
 #include "Shader.h"
 #include "Utility.h"
 #include "MatrixMath.h"
+#include "TextureAsset.h"
 
 static const char *vertex = R"vertex(#version 300 es
 in vec3 inPosition;
@@ -72,6 +73,47 @@ static void computeCameraMatrices(float width, float height, float* proj, float*
     MatrixMath::multiply(viewProj, proj, view);
 }
 
+void Renderer::renderBackground() {
+    if (!bgTexture_ || !shader_) return;
+
+    float aspect = float(width_) / float(height_);
+    float ortho[16];
+    MatrixMath::orthographic(ortho, -aspect, aspect, -1.0f, 1.0f, -1.0f, 1.0f);
+
+    float model[16];
+    MatrixMath::identity(model);
+    MatrixMath::scale(model, aspect, 1.0f, 1.0f);
+
+    float mvp[16];
+    MatrixMath::multiply(mvp, ortho, model);
+
+    shader_->setProjectionMatrix(mvp);
+    shader_->setColor(1.0f, 1.0f, 1.0f, 1.0f);
+    shader_->setUseTexture(true);
+
+    static const std::vector<Vertex> bgVertices = {
+        Vertex(Vector3{-1.0f,  1.0f, 0.0f}, Vector2{0, 0}),
+        Vertex(Vector3{ 1.0f,  1.0f, 0.0f}, Vector2{1, 0}),
+        Vertex(Vector3{ 1.0f, -1.0f, 0.0f}, Vector2{1, 1}),
+        Vertex(Vector3{-1.0f, -1.0f, 0.0f}, Vector2{0, 1})
+    };
+    static const std::vector<uint16_t> bgIndices = { 0, 1, 2, 0, 2, 3 };
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, bgTexture_->getTextureID());
+
+    shader_->drawIndexed(
+        bgVertices.data(),
+        sizeof(Vertex),
+        0,
+        sizeof(Vector3),
+        bgIndices.data(),
+        bgIndices.size()
+    );
+
+    shader_->setUseTexture(false);
+}
+
 void Renderer::render() {
     updateRenderArea();
 
@@ -90,14 +132,16 @@ void Renderer::render() {
     glClearColor(0.07f, 0.09f, 0.13f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // 1. Render 3D Platform & Cubes with Depth Test
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
-
     if (shader_) {
         shader_->activate();
 
-        // Draw 3D platform & cubes
+        // 0. Render Background Image Quad (No depth testing)
+        glDisable(GL_DEPTH_TEST);
+        renderBackground();
+
+        // 1. Render 3D Platform & Cubes with Depth Testing
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
         cubeGrid_.render(*shader_, viewProj);
 
         // Draw 3D particle waves (with alpha blending)
@@ -170,6 +214,10 @@ void Renderer::initRenderer() {
     shader_ = std::unique_ptr<Shader>(
             Shader::loadShader(vertex, fragment, "inPosition", "inUV", "uProjection", "uColor", "uUseTexture"));
     assert(shader_);
+
+    // Load background_cubes.jpeg texture from assets
+    auto assetManager = app_->activity->assetManager;
+    bgTexture_ = TextureAsset::loadAsset(assetManager, "background_cubes.jpeg");
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);

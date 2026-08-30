@@ -138,7 +138,7 @@ public:
             MatrixMath::multiply(mvp, viewProjMatrix, model);
             shader.setProjectionMatrix(mvp);
 
-            float r = 0.95f, g = 0.95f, b = 0.95f;
+            float r = 0.95f, g = 0.96f, b = 0.98f;
             if (cube.state == CUBE_STATE_BLUE) {
                 r = 0.05f; g = 0.55f; b = 1.0f;
             } else if (cube.state == CUBE_STATE_RED) {
@@ -173,8 +173,8 @@ private:
         MatrixMath::multiply(mvp, viewProjMatrix, model);
         shader.setProjectionMatrix(mvp);
 
-        // Render platform faces (dark metallic tech floor)
-        float r = 0.28f, g = 0.32f, b = 0.38f;
+        // Render platform faces with metallic steel-blue tint matching background_cubes.jpeg
+        float r = 0.35f, g = 0.40f, b = 0.46f;
         for (size_t f = 0; f < platformFaceCount_; ++f) {
             float shade = platformFaceShades_[f];
             shader.setColor(r * shade, g * shade, b * shade, 1.0f);
