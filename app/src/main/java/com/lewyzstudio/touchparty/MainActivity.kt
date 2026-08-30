@@ -1,6 +1,6 @@
 package com.lewyzstudio.touchparty
 
-import android.content.Context
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
@@ -20,6 +20,7 @@ class MainActivity : GameActivity() {
     }
 
     private var vibrator: Vibrator? = null
+    private var mediaPlayer: MediaPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +36,18 @@ class MainActivity : GameActivity() {
         } else {
             @Suppress("DEPRECATION")
             getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+    }
+
+    fun playCountdownAudio() {
+        runOnUiThread {
+            try {
+                mediaPlayer?.release()
+                mediaPlayer = MediaPlayer.create(this, R.raw.countdown_party)
+                mediaPlayer?.start()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -72,6 +85,16 @@ class MainActivity : GameActivity() {
         if (hasFocus) {
             hideSystemUi()
         }
+    }
+
+    override fun onDestroy() {
+        try {
+            mediaPlayer?.release()
+            mediaPlayer = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        super.onDestroy()
     }
 
     private fun hideSystemUi() {

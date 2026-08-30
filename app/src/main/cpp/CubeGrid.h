@@ -73,7 +73,6 @@ public:
     }
 
     int pickCube(const Vec3& rayOrigin, const Vec3& rayDir) const {
-        // Inverse rotate the incoming ray by -boardRotationY_ around Y axis
         float negRad = degToRad(-boardRotationY_);
         float cosA = std::cos(negRad);
         float sinA = std::sin(negRad);
@@ -131,17 +130,9 @@ public:
 
         cube.jumpTime = 0.001f;
 
-        // Transform cube base position by board rotation to get world position for particle effects
-        float rad = degToRad(boardRotationY_);
-        float c = std::cos(rad);
-        float s = std::sin(rad);
-
-        Vec3 pos = cube.basePos;
-        pos.y += cube.yOffset;
-
-        outPos.x = pos.x * c - pos.z * s;
-        outPos.y = pos.y;
-        outPos.z = pos.x * s + pos.z * c;
+        // Return local unrotated board position so particles rotate along with the board
+        outPos = cube.basePos;
+        outPos.y += cube.yOffset;
 
         outState = cube.state;
         return true;

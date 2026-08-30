@@ -6,6 +6,9 @@
 #include <vector>
 #include <mutex>
 #include <algorithm>
+#include <jni.h>
+#include <game-activity/native_app_glue/android_native_app_glue.h>
+#include <game-activity/GameActivity.h>
 #include "AndroidOut.h"
 
 enum SoundType {
@@ -39,6 +42,43 @@ public:
 
     ~AudioEngine() {
         stopAAudio();
+    }
+
+    static void triggerCountdownAudio(android_app* app) {
+        if (!app || !app->activity || !app->activity->vm || !app->activity->javaGameActivity) return;
+
+        JavaVM* vm = app->activity->vm;
+        JNIEnv* env = nullptr;
+        bool isAttached = false;
+
+        jint res = vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+        if (res == JNI_EDETACHED) {
+            if (vm->AttachCurrentThread(&env, nullptr) == JNI_OK) {
+                isAttached = true;
+            } else {
+                return;
+            }
+        }
+
+        if (env) {
+            jobject activityObj = app->activity->javaGameActivity;
+            jclass activityClass = env->GetObjectClass(activityObj);
+            if (activityClass) {
+                jmethodID method = env->GetMethodID(activityClass, "playCountdownAudio", "()V");
+                if (method) {
+                    env->CallVoidMethod(activityObj, method);
+                } else {
+                    env->ExceptionClear();
+                }
+                env->DeleteLocalRef(activityClass);
+            } else {
+                env->ExceptionClear();
+            }
+        }
+
+        if (isAttached) {
+            vm->DetachCurrentThread();
+        }
     }
 
     void playTapSound(int state) {

@@ -157,10 +157,10 @@ void Renderer::render() {
         glDepthFunc(GL_LESS);
         cubeGrid_.render(*shader_, viewProj);
 
-        // Draw 3D particle waves
+        // Draw 3D particle waves (rotating along with the board)
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        particleSystem_.render(*shader_, viewProj);
+        particleSystem_.render(*shader_, viewProj, cubeGrid_.getBoardRotationY());
 
         // 2. Render 2D UI Overlay
         glDisable(GL_DEPTH_TEST);
@@ -274,10 +274,11 @@ void Renderer::handleInput() {
             if (uiAction == TouchAction::RESET) {
                 cubeGrid_.reset();
                 particleSystem_.clear();
-                audioEngine_.playGoChime();
+                AudioEngine::triggerCountdownAudio(app_);
             } else if (uiAction == TouchAction::PLAY) {
                 cubeGrid_.reset();
                 particleSystem_.clear();
+                AudioEngine::triggerCountdownAudio(app_);
             } else if (gameUI_.getState() == GameState::PLAYING) {
                 // 2. Unproject screen touch to 3D ray for Cube Picking
                 float proj[16], view[16], viewProj[16], invViewProj[16];
@@ -292,13 +293,9 @@ void Renderer::handleInput() {
                         Vec3 cubePos;
                         CubeState newState;
                         if (cubeGrid_.tapCube(pickedCube, cubePos, newState)) {
-                            // Play procedural tap sound
                             audioEngine_.playTapSound(static_cast<int>(newState));
-
-                            // Trigger haptic vibration for device
                             VibrationEngine::triggerVibration(app_, static_cast<int>(newState));
 
-                            // Spawn particle shockwave wave
                             if (newState == CUBE_STATE_BLUE) {
                                 particleSystem_.spawnWave(cubePos, 0.05f, 0.55f, 1.0f);
                             } else if (newState == CUBE_STATE_RED) {

@@ -63,7 +63,7 @@ public:
             particles_.end());
     }
 
-    void render(const Shader& shader, const float* viewProjMatrix) const {
+    void render(const Shader& shader, const float* viewProjMatrix, float boardRotationY = 0.0f) const {
         if (particles_.empty()) return;
 
         shader.setUseTexture(false);
@@ -76,6 +76,11 @@ public:
 
             float model[16];
             MatrixMath::identity(model);
+
+            if (boardRotationY > 0.0f) {
+                MatrixMath::rotateY(model, degToRad(boardRotationY));
+            }
+
             MatrixMath::translate(model, p.pos.x, p.pos.y, p.pos.z);
             MatrixMath::scale(model, p.currentRadius, 1.0f, p.currentRadius);
 
