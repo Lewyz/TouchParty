@@ -9,6 +9,7 @@
 #include "CubeGrid.h"
 #include "ParticleSystem.h"
 #include "GameUI.h"
+#include "AudioEngine.h"
 
 struct android_app;
 
@@ -48,6 +49,7 @@ private:
     CubeGrid cubeGrid_;
     ParticleSystem particleSystem_;
     GameUI gameUI_;
+    AudioEngine audioEngine_;
 
     std::chrono::high_resolution_clock::time_point lastTime_;
 };

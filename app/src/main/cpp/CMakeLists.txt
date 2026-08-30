@@ -27,10 +27,11 @@ target_link_libraries(touchparty
         # The game activity
         game-activity::game-activity_static
 
-        # EGL and other dependent libraries required for drawing
+        # EGL, AAudio, and other dependent libraries required for drawing
         # and interacting with Android system
         EGL
         GLESv3
+        aaudio
         jnigraphics
         android
         log)

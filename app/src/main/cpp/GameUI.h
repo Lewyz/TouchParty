@@ -8,6 +8,7 @@
 #include "MatrixMath.h"
 #include "Shader.h"
 #include "Model.h"
+#include "AudioEngine.h"
 
 enum class GameState {
     MENU,
@@ -17,7 +18,7 @@ enum class GameState {
 
 class GameUI {
 public:
-    GameUI() : state_(GameState::MENU), countdownTimer_(0.0f), uiCubeRot_(0.0f) {
+    GameUI() : state_(GameState::MENU), countdownTimer_(0.0f), uiCubeRot_(0.0f), lastCountdownSec_(-1) {
         initQuadGeometry();
         initMiniCubeGeometry();
     }
@@ -25,24 +26,37 @@ public:
     GameState getState() const { return state_; }
     void setState(GameState state) { state_ = state; }
 
-    void startCountdown() {
+    void startCountdown(AudioEngine* audioEngine = nullptr) {
         state_ = GameState::COUNTDOWN;
         countdownTimer_ = 0.0f;
+        lastCountdownSec_ = -1;
+        if (audioEngine) audioEngine->playCountdownBeep();
     }
 
-    void update(float deltaTime) {
-        uiCubeRot_ += deltaTime * 50.0f; // Spin rate for 3D UI mini-cubes
+    void update(float deltaTime, AudioEngine* audioEngine = nullptr) {
+        uiCubeRot_ += deltaTime * 50.0f;
         if (uiCubeRot_ >= 360.0f) uiCubeRot_ -= 360.0f;
 
         if (state_ == GameState::COUNTDOWN) {
+            int currentSec = static_cast<int>(countdownTimer_);
             countdownTimer_ += deltaTime;
+            int newSec = static_cast<int>(countdownTimer_);
+
+            if (newSec != currentSec) {
+                if (newSec >= 1 && newSec <= 2 && audioEngine) {
+                    audioEngine->playCountdownBeep();
+                } else if (newSec == 3 && audioEngine) {
+                    audioEngine->playGoChime();
+                }
+            }
+
             if (countdownTimer_ >= 4.0f) {
                 state_ = GameState::PLAYING;
             }
         }
     }
 
-    bool handleTouch(float screenX, float screenY, float width, float height) {
+    bool handleTouch(float screenX, float screenY, float width, float height, AudioEngine* audioEngine = nullptr) {
         if (state_ == GameState::MENU) {
             float aspect = width / height;
             float normX = ((2.0f * screenX) / width - 1.0f) * aspect;
@@ -51,7 +65,7 @@ public:
             float dx = normX - 0.0f;
             float dy = normY - (-0.1f);
             if (dx * dx + dy * dy <= 0.25f * 0.25f) {
-                startCountdown();
+                startCountdown(audioEngine);
                 return true;
             }
         }
@@ -85,19 +99,15 @@ private:
         // Top-Left Panel (RED Score)
         float redX = -aspect + panelW * 0.5f + 0.06f;
         drawQuad(shader, ortho, redX, panelY, panelW, panelH, 0.12f, 0.15f, 0.22f, 0.92f);
-        drawQuad(shader, ortho, redX, panelY - panelH * 0.5f, panelW, 0.01f, 1.0f, 0.22f, 0.22f, 0.95f); // Red underline
-        // 3D Mini Red Cube
+        drawQuad(shader, ortho, redX, panelY - panelH * 0.5f, panelW, 0.01f, 1.0f, 0.22f, 0.22f, 0.95f);
         draw3DMiniCube(shader, ortho, redX - panelW * 0.30f, panelY, 1.0f, 0.22f, 0.22f);
-        // RED count digits
         drawDigits(shader, ortho, redX + 0.04f, panelY, redCount, 1.0f, 0.35f, 0.35f);
 
         // Top-Right Panel (BLUE Score)
         float blueX = aspect - panelW * 0.5f - 0.06f;
         drawQuad(shader, ortho, blueX, panelY, panelW, panelH, 0.12f, 0.15f, 0.22f, 0.92f);
-        drawQuad(shader, ortho, blueX, panelY - panelH * 0.5f, panelW, 0.01f, 0.05f, 0.55f, 1.0f, 0.95f); // Blue underline
-        // 3D Mini Blue Cube
+        drawQuad(shader, ortho, blueX, panelY - panelH * 0.5f, panelW, 0.01f, 0.05f, 0.55f, 1.0f, 0.95f);
         draw3DMiniCube(shader, ortho, blueX - panelW * 0.30f, panelY, 0.05f, 0.55f, 1.0f);
-        // BLUE count digits
         drawDigits(shader, ortho, blueX + 0.04f, panelY, blueCount, 0.25f, 0.68f, 1.0f);
     }
 
@@ -347,6 +357,7 @@ private:
     GameState state_;
     float countdownTimer_;
     float uiCubeRot_;
+    int lastCountdownSec_;
     std::vector<Vertex> quadVertices_;
     std::vector<uint16_t> quadIndices_;
     std::vector<Vertex> circleVertices_;

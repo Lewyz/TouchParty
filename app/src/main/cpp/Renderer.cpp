@@ -80,7 +80,7 @@ void Renderer::render() {
     lastTime_ = now;
     if (dt > 0.1f) dt = 0.1f;
 
-    gameUI_.update(dt);
+    gameUI_.update(dt, &audioEngine_);
     cubeGrid_.update(dt);
     particleSystem_.update(dt);
 
@@ -210,7 +210,7 @@ void Renderer::handleInput() {
         int actionMasked = action & AMOTION_EVENT_ACTION_MASK;
         if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
             // 1. Try handling touch on 2D Game UI (Play button)
-            if (gameUI_.handleTouch(x, y, float(width_), float(height_))) {
+            if (gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_)) {
                 // UI consumed touch
             } else if (gameUI_.getState() == GameState::PLAYING) {
                 // 2. Unproject screen touch to 3D ray for Cube Picking
@@ -226,6 +226,10 @@ void Renderer::handleInput() {
                         Vec3 cubePos;
                         CubeState newState;
                         if (cubeGrid_.tapCube(pickedCube, cubePos, newState)) {
+                            // Play procedural tap sound!
+                            audioEngine_.playTapSound(static_cast<int>(newState));
+
+                            // Spawn particle shockwave wave
                             if (newState == CUBE_STATE_BLUE) {
                                 particleSystem_.spawnWave(cubePos, 0.05f, 0.55f, 1.0f);
                             } else if (newState == CUBE_STATE_RED) {
