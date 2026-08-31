@@ -10,14 +10,19 @@ static Renderer* g_pRenderer = nullptr;
 
 extern "C" {
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_lewyzstudio_touchparty_MainActivity_nativeOnTextInputResult(
         JNIEnv *env, jclass clazz, jint fieldType, jstring text) {
-    const char *nativeString = env->GetStringUTFChars(text, nullptr);
-    if (g_pRenderer && nativeString) {
-        g_pRenderer->getUI().onTextInputResult(fieldType, nativeString);
+    if (!g_pRenderer) {
+        return JNI_FALSE;
     }
-    env->ReleaseStringUTFChars(text, nativeString);
+    const char *nativeString = env->GetStringUTFChars(text, nullptr);
+    if (nativeString) {
+        g_pRenderer->getUI().onTextInputResult(fieldType, nativeString);
+        env->ReleaseStringUTFChars(text, nativeString);
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -25,6 +30,98 @@ Java_com_lewyzstudio_touchparty_MainActivity_nativeSetServerConnected(
         JNIEnv *env, jclass clazz, jboolean connected) {
     if (g_pRenderer) {
         g_pRenderer->getUI().setServerConnected(connected == JNI_TRUE);
+    }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeSetServerRooms(
+        JNIEnv *env, jclass clazz, jstring jsonRooms) {
+    if (!g_pRenderer) return JNI_FALSE;
+    const char *nativeString = env->GetStringUTFChars(jsonRooms, nullptr);
+    if (nativeString) {
+        g_pRenderer->getUI().setServerRoomsJson(nativeString);
+        env->ReleaseStringUTFChars(jsonRooms, nativeString);
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeOnRoomJoined(
+        JNIEnv *env, jclass clazz, jstring roomId, jboolean isOwner) {
+    if (!g_pRenderer) return JNI_FALSE;
+    const char *nativeString = env->GetStringUTFChars(roomId, nullptr);
+    if (nativeString) {
+        g_pRenderer->getUI().onRoomJoined(nativeString, isOwner == JNI_TRUE);
+        env->ReleaseStringUTFChars(roomId, nativeString);
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeOnRoomStateUpdated(
+        JNIEnv *env, jclass clazz, jstring roomId, jstring roomName, jint playerCount, jboolean isPrivate, jstring ownerId, jstring state) {
+    if (!g_pRenderer) return JNI_FALSE;
+    const char *nativeName = env->GetStringUTFChars(roomName, nullptr);
+    if (nativeName) {
+        g_pRenderer->getUI().onRoomStateUpdated(nativeName, playerCount, isPrivate == JNI_TRUE);
+        env->ReleaseStringUTFChars(roomName, nativeName);
+        return JNI_TRUE;
+    }
+    return JNI_FALSE;
+}
+
+void nativeWsRequestCreateRoom(android_app* app, const std::string& name, bool isPrivate, const std::string& pin) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestCreateRoom", "(Ljava/lang/String;ZLjava/lang/String;)V");
+    if (method) {
+        jstring jName = env->NewStringUTF(name.c_str());
+        jstring jPin = env->NewStringUTF(pin.c_str());
+        env->CallVoidMethod(activityObj, method, jName, static_cast<jboolean>(isPrivate), jPin);
+        env->DeleteLocalRef(jName);
+        env->DeleteLocalRef(jPin);
+    }
+}
+
+void nativeWsRequestListRooms(android_app* app) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestListRooms", "()V");
+    if (method) {
+        env->CallVoidMethod(activityObj, method);
+    }
+}
+
+void nativeWsRequestJoinRoom(android_app* app, const std::string& roomId, const std::string& pin) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestJoinRoom", "(Ljava/lang/String;Ljava/lang/String;)V");
+    if (method) {
+        jstring jRoomId = env->NewStringUTF(roomId.c_str());
+        jstring jPin = env->NewStringUTF(pin.c_str());
+        env->CallVoidMethod(activityObj, method, jRoomId, jPin);
+        env->DeleteLocalRef(jRoomId);
+        env->DeleteLocalRef(jPin);
     }
 }
 

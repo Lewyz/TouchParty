@@ -55,6 +55,7 @@ enum class TouchAction {
 };
 
 struct ServerRoomEntry {
+    std::string id;
     std::string name;
     bool isPrivate = false;
     int playerCount = 0;
@@ -73,7 +74,7 @@ public:
           isPrivateRoom_(false),
           roomPin_("1234"),
           roomName_("SALA DE JUGADOR"),
-          userNickname_("JUGADOR 1"),
+          userNickname_(""),
           isServerConnected_(false),
           connectedPlayerCount_(1),
           filterTypeIndex_(0),
@@ -94,6 +95,7 @@ public:
     bool isPrivateRoom() const { return isPrivateRoom_; }
     const std::string& getRoomPin() const { return roomPin_; }
     const std::string& getRoomName() const { return roomName_; }
+    const std::string& getSelectedRoomId() const { return selectedRoomId_; }
     const std::string& getUserNickname() const { return userNickname_; }
     bool isServerConnected() const { return isServerConnected_; }
     void setServerConnected(bool connected) { isServerConnected_ = connected; }
@@ -116,10 +118,18 @@ public:
         joinNotificationTimer_ = 3.5f;
     }
 
+    void triggerWelcomeNotification(const std::string& nickname) {
+        joinNotificationText_ = (Strings::getLanguage() == Language::SPANISH) ?
+            ("¡BIENVENIDO DE NUEVO, " + nickname + "!") :
+            ("WELCOME BACK, " + nickname + "!");
+        joinNotificationTimer_ = 4.0f;
+    }
+
     void onTextInputResult(int fieldType, const std::string& text) {
         if (text.empty()) return;
         if (fieldType == 0) {
             userNickname_ = text;
+            triggerWelcomeNotification(userNickname_);
         } else if (fieldType == 1) {
             roomName_ = text;
         } else if (fieldType == 2) {
@@ -130,6 +140,56 @@ public:
     void setServerRooms(const std::vector<ServerRoomEntry>& rooms) {
         serverRooms_ = rooms;
         roomListScrollOffset_ = 0;
+    }
+
+    void setServerRoomsJson(const std::string& jsonRooms) {
+        serverRooms_.clear();
+        size_t pos = 0;
+        while ((pos = jsonRooms.find('{', pos)) != std::string::npos) {
+            size_t endPos = jsonRooms.find('}', pos);
+            if (endPos == std::string::npos) break;
+            std::string objStr = jsonRooms.substr(pos, endPos - pos + 1);
+
+            ServerRoomEntry entry;
+            auto getVal = [&](const std::string& key) -> std::string {
+                size_t k = objStr.find("\"" + key + "\":");
+                if (k == std::string::npos) return "";
+                size_t valStart = objStr.find_first_not_of(" :\"", k + key.length() + 3);
+                if (valStart == std::string::npos) return "";
+                size_t valEnd = objStr.find_first_of("\",}", valStart);
+                if (valEnd == std::string::npos) valEnd = objStr.length();
+                return objStr.substr(valStart, valEnd - valStart);
+            };
+
+            entry.id = getVal("id");
+            entry.name = getVal("name");
+            std::string priv = getVal("isPrivate");
+            entry.isPrivate = (priv == "true");
+            std::string pc = getVal("playerCount");
+            if (!pc.empty()) entry.playerCount = std::atoi(pc.c_str());
+            std::string mp = getVal("maxPlayers");
+            if (!mp.empty()) entry.maxPlayers = std::atoi(mp.c_str());
+            entry.pin = getVal("pin");
+
+            if (!entry.name.empty() || !entry.id.empty()) {
+                serverRooms_.push_back(entry);
+            }
+            pos = endPos + 1;
+        }
+        roomListScrollOffset_ = 0;
+    }
+
+    void onRoomJoined(const std::string& roomId, bool isOwner) {
+        state_ = GameState::ROOM_LOBBY;
+        if (isOwner) {
+            connectedPlayerCount_ = 1;
+        }
+    }
+
+    void onRoomStateUpdated(const std::string& name, int playerCount, bool isPrivate) {
+        if (!name.empty()) roomName_ = name;
+        connectedPlayerCount_ = playerCount;
+        isPrivateRoom_ = isPrivate;
     }
 
     void startCountdown(AudioEngine* audioEngine = nullptr) {
@@ -205,15 +265,6 @@ public:
                 connectedPlayerCount_ = 2; // Local 1v1 practice test
                 startCountdown(audioEngine);
                 return TouchAction::START_LOCAL_GAME;
-            }
-
-            // Edit Nickname Box
-            float nickX = 0.0f, nickY = 0.20f, nickW = 1.15f, nickH = 0.14f;
-            if (std::abs(normX - nickX) <= nickW * 0.5f + 0.04f &&
-                std::abs(normY - nickY) <= nickH * 0.5f + 0.04f) {
-                triggerNativeTextInput(app, 0, Strings::get(StringId::PROMPT_ENTER_NICKNAME), userNickname_);
-                if (audioEngine) audioEngine->playCountdownBeep();
-                return TouchAction::EDIT_NICKNAME;
             }
 
             // BUSCAR SALAS Button (Left Side)
@@ -359,6 +410,7 @@ public:
                 if (std::abs(normX - joinX) <= joinW * 0.5f + 0.04f &&
                     std::abs(normY - rowY) <= joinH * 0.5f + 0.04f) {
                     const auto& room = filtered[i + roomListScrollOffset_];
+                    selectedRoomId_ = room.id;
                     roomName_ = room.name;
                     isPrivateRoom_ = room.isPrivate;
                     roomPin_ = room.pin;
@@ -418,6 +470,9 @@ public:
         } else {
             // Render Global Server Connection Banner on all Menu Screens
             renderServerStatusBanner(shader, ortho, aspect);
+
+            // Render Top Right Registered User NickName Badge with White Background
+            renderTopRightNicknameBadge(shader, ortho, aspect);
 
             // Render Player Join Banner Notification if active
             if (joinNotificationTimer_ > 0.0f) {
@@ -497,9 +552,25 @@ private:
         }
     }
 
+    void renderTopRightNicknameBadge(const Shader& shader, const float* ortho, float aspect) const {
+        if (userNickname_.empty()) return;
+
+        float badgeX = aspect - 0.35f;
+        float badgeY = 0.85f;
+        float badgeW = 0.52f;
+        float badgeH = 0.11f;
+
+        // Pure white background box
+        drawQuad(shader, ortho, badgeX, badgeY, badgeW, badgeH, 1.0f, 1.0f, 1.0f, 1.0f);
+        // Accent border for depth
+        drawQuad(shader, ortho, badgeX, badgeY - badgeH * 0.5f, badgeW, 0.008f, 0.20f, 0.60f, 0.95f, 1.0f);
+        // Dark text for maximum contrast on white background
+        drawTextString(shader, ortho, badgeX, badgeY, userNickname_, 0.098f, 0.05f, 0.08f, 0.12f);
+    }
+
     void renderWelcomeScreen(const Shader& shader, const float* ortho, float aspect) const {
         float cx = 0.0f, cy = -0.03f;
-        float cardW = 1.45f, cardH = 0.85f;
+        float cardW = 1.45f, cardH = 0.72f;
 
         // Container card
         drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.08f, 0.11f, 0.18f, 0.94f);
@@ -512,15 +583,10 @@ private:
         drawTextString(shader, ortho, testX, testY, Strings::get(StringId::TEST_1V1), 0.087f, 1.0f, 1.0f, 1.0f);
 
         // Header Title
-        drawTextString(shader, ortho, cx, cy + 0.32f, Strings::get(StringId::TITLE_GAME), 0.138f, 1.0f, 0.85f, 0.10f);
-
-        // User Profile Nickname Row
-        float nickX = 0.0f, nickY = 0.18f, nickW = 1.15f, nickH = 0.14f;
-        drawQuad(shader, ortho, nickX, nickY, nickW, nickH, 0.12f, 0.16f, 0.25f, 0.92f);
-        drawTextString(shader, ortho, nickX, nickY, Strings::get(StringId::NICKNAME_LABEL) + userNickname_ + Strings::get(StringId::NICKNAME_EDIT), 0.098f, 0.20f, 0.90f, 1.0f);
+        drawTextString(shader, ortho, cx, cy + 0.18f, Strings::get(StringId::TITLE_GAME), 0.138f, 1.0f, 0.85f, 0.10f);
 
         // Navigation Buttons Side by Side (Left: BUSCAR SALAS, Right: CREAR SALA)
-        float btnY = -0.10f, btnW = 0.64f, btnH = 0.20f;
+        float btnY = -0.12f, btnW = 0.64f, btnH = 0.20f;
 
         // BUSCAR SALAS (Left)
         float leftX = -0.36f;
@@ -978,6 +1044,7 @@ private:
     bool isPrivateRoom_;
     std::string roomPin_;
     std::string roomName_;
+    std::string selectedRoomId_;
     std::string userNickname_;
     bool isServerConnected_;
     int connectedPlayerCount_;

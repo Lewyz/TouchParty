@@ -12,6 +12,12 @@
 #include "TextureAsset.h"
 #include "VibrationEngine.h"
 
+extern "C" {
+void nativeWsRequestCreateRoom(android_app* app, const std::string& name, bool isPrivate, const std::string& pin);
+void nativeWsRequestListRooms(android_app* app);
+void nativeWsRequestJoinRoom(android_app* app, const std::string& roomId, const std::string& pin);
+}
+
 static const char *vertex = R"vertex(#version 300 es
 in vec3 inPosition;
 in vec2 inUV;
@@ -279,6 +285,14 @@ void Renderer::handleInput() {
         if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
             // 1. Try handling touch on 2D Game UI (Play, Create, Join, Back, or Reset button)
             TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_, app_);
+
+            if (uiAction == TouchAction::CONFIRM_CREATE_ROOM) {
+                nativeWsRequestCreateRoom(app_, gameUI_.getRoomName(), gameUI_.isPrivateRoom(), gameUI_.getRoomPin());
+            } else if (uiAction == TouchAction::GOTO_ROOM_LIST || uiAction == TouchAction::REFRESH_ROOMS) {
+                nativeWsRequestListRooms(app_);
+            } else if (uiAction == TouchAction::JOIN_SELECTED_ROOM) {
+                nativeWsRequestJoinRoom(app_, gameUI_.getSelectedRoomId(), gameUI_.getRoomPin());
+            }
 
             if (uiAction == TouchAction::RESET || uiAction == TouchAction::START_LOCAL_GAME ||
                 uiAction == TouchAction::CONFIRM_CREATE_ROOM || uiAction == TouchAction::JOIN_SELECTED_ROOM ||

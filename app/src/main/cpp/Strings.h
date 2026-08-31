@@ -95,7 +95,7 @@ public:
             case StringId::FILTER_ALL:
                 return (lang == Language::SPANISH) ? "TODAS" : "ALL";
             case StringId::FILTER_PUBLIC:
-                return (lang == Language::SPANISH) ? "PÚBLICAS" : "PUBLIC";
+                return (lang == Language::SPANISH) ? "PUBLICAS" : "PUBLIC";
             case StringId::FILTER_PRIVATE:
                 return (lang == Language::SPANISH) ? "PRIVADAS" : "PRIVATE";
             case StringId::SCROLL_UP:

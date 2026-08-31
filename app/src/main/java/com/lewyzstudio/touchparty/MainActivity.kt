@@ -14,6 +14,7 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.EditText
+import android.widget.Toast
 import com.google.androidgamesdk.GameActivity
 import java.net.HttpURLConnection
 import java.net.URL
@@ -25,10 +26,61 @@ class MainActivity : GameActivity() {
         }
 
         @JvmStatic
-        external fun nativeOnTextInputResult(fieldType: Int, text: String)
+        external fun nativeOnTextInputResult(fieldType: Int, text: String): Boolean
 
         @JvmStatic
         external fun nativeSetServerConnected(connected: Boolean)
+
+        @JvmStatic
+        external fun nativeSetServerRooms(jsonRooms: String): Boolean
+
+        @JvmStatic
+        external fun nativeOnRoomJoined(roomId: String, isOwner: Boolean): Boolean
+
+        @JvmStatic
+        external fun nativeOnRoomStateUpdated(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, state: String): Boolean
+
+        @JvmStatic
+        fun sendServerRoomsToNative(roomsJson: String) {
+            Thread {
+                var retries = 0
+                while (retries < 30) {
+                    try {
+                        if (nativeSetServerRooms(roomsJson)) break
+                    } catch (_: Exception) {}
+                    try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+                    retries++
+                }
+            }.start()
+        }
+
+        @JvmStatic
+        fun sendRoomJoinedToNative(roomId: String, isOwner: Boolean) {
+            Thread {
+                var retries = 0
+                while (retries < 30) {
+                    try {
+                        if (nativeOnRoomJoined(roomId, isOwner)) break
+                    } catch (_: Exception) {}
+                    try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+                    retries++
+                }
+            }.start()
+        }
+
+        @JvmStatic
+        fun sendRoomStateToNative(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, state: String) {
+            Thread {
+                var retries = 0
+                while (retries < 30) {
+                    try {
+                        if (nativeOnRoomStateUpdated(roomId, roomName, playerCount, isPrivate, ownerId, state)) break
+                    } catch (_: Exception) {}
+                    try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+                    retries++
+                }
+            }.start()
+        }
     }
 
     private var vibrator: Vibrator? = null
@@ -55,14 +107,56 @@ class MainActivity : GameActivity() {
 
         checkAndPromptInitialNickname()
         startServerHealthCheck()
+        GameWebSocketManager.init()
+    }
+
+    fun requestCreateRoom(roomName: String, isPrivate: Boolean, pin: String) {
+        val nick = getSavedNickname()
+        GameWebSocketManager.createRoom(roomName, isPrivate, pin, nick)
+    }
+
+    fun requestListRooms() {
+        GameWebSocketManager.listRooms()
+    }
+
+    fun requestJoinRoom(roomId: String, pin: String) {
+        val nick = getSavedNickname()
+        GameWebSocketManager.joinRoom(roomId, pin, nick)
+    }
+
+    fun requestLeaveRoom() {
+        GameWebSocketManager.leaveRoom()
     }
 
     private fun checkAndPromptInitialNickname() {
         val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
         val savedNick = prefs.getString("user_nickname", null)
         if (savedNick.isNullOrEmpty()) {
-            showTextInputDialog(0, "BIENVENIDO A TOUCHPARTY", "JUGADOR_1")
+            showTextInputDialog(0, "INGRESA TU NICKNAME DE JUGADOR", "")
+        } else {
+            sendSavedNicknameToNative(savedNick)
+            Toast.makeText(this, "¡Bienvenido de nuevo, $savedNick!", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun sendSavedNicknameToNative(nick: String) {
+        Thread {
+            var retries = 0
+            while (retries < 60) {
+                try {
+                    val sent = nativeOnTextInputResult(0, nick)
+                    if (sent) {
+                        break
+                    }
+                } catch (_: Exception) {}
+                try {
+                    Thread.sleep(100)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                retries++
+            }
+        }.start()
     }
 
     fun getSavedNickname(): String {
@@ -95,8 +189,10 @@ class MainActivity : GameActivity() {
                 if (enteredText.isNotEmpty()) {
                     if (fieldType == 0) {
                         saveNickname(enteredText)
+                        sendSavedNicknameToNative(enteredText)
+                    } else {
+                        nativeOnTextInputResult(fieldType, enteredText)
                     }
-                    nativeOnTextInputResult(fieldType, enteredText)
                 }
             }
             builder.setNegativeButton("CANCELAR") { dialog, _ ->
