@@ -74,7 +74,7 @@ public:
           roomPin_("1234"),
           roomName_("SALA DE JUGADOR"),
           userNickname_("JUGADOR 1"),
-          isServerConnected_(true),
+          isServerConnected_(false),
           connectedPlayerCount_(1),
           filterTypeIndex_(0),
           roomListScrollOffset_(0),

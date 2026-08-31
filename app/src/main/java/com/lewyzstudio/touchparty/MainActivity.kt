@@ -15,6 +15,8 @@ import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.EditText
 import com.google.androidgamesdk.GameActivity
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : GameActivity() {
     companion object {
@@ -24,10 +26,16 @@ class MainActivity : GameActivity() {
 
         @JvmStatic
         external fun nativeOnTextInputResult(fieldType: Int, text: String)
+
+        @JvmStatic
+        external fun nativeSetServerConnected(connected: Boolean)
     }
 
     private var vibrator: Vibrator? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var healthCheckThread: Thread? = null
+    @Volatile
+    private var isCheckingHealth = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +54,7 @@ class MainActivity : GameActivity() {
         }
 
         checkAndPromptInitialNickname()
+        startServerHealthCheck()
     }
 
     private fun checkAndPromptInitialNickname() {
@@ -145,7 +154,51 @@ class MainActivity : GameActivity() {
         }
     }
 
+    private fun startServerHealthCheck() {
+        isCheckingHealth = true
+        healthCheckThread = Thread {
+            val rawUrl = BuildConfig.GAME_SERVER_HTTP_URL
+            val healthUrlStr = if (rawUrl.endsWith("/")) "${rawUrl}health" else "$rawUrl/health"
+
+            while (isCheckingHealth && !isFinishing) {
+                var connected = false
+                try {
+                    val url = URL(healthUrlStr)
+                    val conn = url.openConnection() as HttpURLConnection
+                    conn.requestMethod = "GET"
+                    conn.connectTimeout = 3000
+                    conn.readTimeout = 3000
+                    val responseCode = conn.responseCode
+                    if (responseCode == 200) {
+                        connected = true
+                    }
+                    conn.disconnect()
+                } catch (_: Exception) {
+                    connected = false
+                }
+
+                try {
+                    nativeSetServerConnected(connected)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                try {
+                    Thread.sleep(5000)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+        }.apply {
+            isDaemon = true
+            start()
+        }
+    }
+
     override fun onDestroy() {
+        isCheckingHealth = false
+        healthCheckThread?.interrupt()
+        healthCheckThread = null
         try {
             mediaPlayer?.release()
             mediaPlayer = null

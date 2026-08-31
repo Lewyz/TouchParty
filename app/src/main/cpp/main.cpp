@@ -20,6 +20,14 @@ Java_com_lewyzstudio_touchparty_MainActivity_nativeOnTextInputResult(
     env->ReleaseStringUTFChars(text, nativeString);
 }
 
+JNIEXPORT void JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeSetServerConnected(
+        JNIEnv *env, jclass clazz, jboolean connected) {
+    if (g_pRenderer) {
+        g_pRenderer->getUI().setServerConnected(connected == JNI_TRUE);
+    }
+}
+
 /*!
  * Handles commands sent to this Android application
  * @param pApp the app the commands are coming from
