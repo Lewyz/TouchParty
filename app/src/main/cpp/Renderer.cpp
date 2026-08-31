@@ -127,12 +127,16 @@ void Renderer::render() {
 
     if (gameUI_.getState() == GameState::PLAYING) {
         float remainingTime = gameUI_.getMatchTimer();
-        if (remainingTime <= 15.0f) {
+        if (remainingTime <= 45.0f) {
             float rot = cubeGrid_.getBoardRotationY() + dt * 22.0f;
             if (rot >= 360.0f) rot -= 360.0f;
             cubeGrid_.setBoardRotationY(rot);
         }
-    } else if (gameUI_.getState() == GameState::MENU) {
+    } else if (gameUI_.getState() == GameState::WELCOME ||
+               gameUI_.getState() == GameState::LOBBY_SELECT ||
+               gameUI_.getState() == GameState::CREATE_ROOM ||
+               gameUI_.getState() == GameState::ROOM_LOBBY ||
+               gameUI_.getState() == GameState::ROOM_LIST) {
         cubeGrid_.setBoardRotationY(0.0f);
     }
 
@@ -152,15 +156,19 @@ void Renderer::render() {
         glDisable(GL_DEPTH_TEST);
         renderBackground();
 
-        // 1. Render 3D Platform & Cubes with Depth Testing
-        glEnable(GL_DEPTH_TEST);
-        glDepthFunc(GL_LESS);
-        cubeGrid_.render(*shader_, viewProj);
+        // 1. Render 3D Platform & Cubes (ONLY during active match gameplay)
+        if (gameUI_.getState() == GameState::COUNTDOWN ||
+            gameUI_.getState() == GameState::PLAYING ||
+            gameUI_.getState() == GameState::MATCH_OVER) {
+            glEnable(GL_DEPTH_TEST);
+            glDepthFunc(GL_LESS);
+            cubeGrid_.render(*shader_, viewProj);
 
-        // Draw 3D particle waves (rotating along with the board)
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        particleSystem_.render(*shader_, viewProj, cubeGrid_.getBoardRotationY());
+            // Draw 3D particle waves (rotating along with the board)
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            particleSystem_.render(*shader_, viewProj, cubeGrid_.getBoardRotationY());
+        }
 
         // 2. Render 2D UI Overlay
         glDisable(GL_DEPTH_TEST);
@@ -230,6 +238,7 @@ void Renderer::initRenderer() {
 
     auto assetManager = app_->activity->assetManager;
     bgTexture_ = TextureAsset::loadAsset(assetManager, "background_cubes.jpeg");
+    gameUI_.initFont(assetManager, "calculator.ttf");
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -268,17 +277,17 @@ void Renderer::handleInput() {
 
         int actionMasked = action & AMOTION_EVENT_ACTION_MASK;
         if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
-            // 1. Try handling touch on 2D Game UI (Play or Reset button)
-            TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_);
+            // 1. Try handling touch on 2D Game UI (Play, Create, Join, Back, or Reset button)
+            TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_, app_);
 
-            if (uiAction == TouchAction::RESET) {
-                cubeGrid_.reset();
-                particleSystem_.clear();
-                AudioEngine::triggerCountdownAudio(app_);
-            } else if (uiAction == TouchAction::PLAY) {
-                cubeGrid_.reset();
-                particleSystem_.clear();
-                AudioEngine::triggerCountdownAudio(app_);
+            if (uiAction == TouchAction::RESET || uiAction == TouchAction::START_LOCAL_GAME ||
+                uiAction == TouchAction::CONFIRM_CREATE_ROOM || uiAction == TouchAction::JOIN_SELECTED_ROOM ||
+                uiAction == TouchAction::PLAY) {
+                if (gameUI_.getState() == GameState::COUNTDOWN || gameUI_.getState() == GameState::PLAYING) {
+                    cubeGrid_.reset();
+                    particleSystem_.clear();
+                    AudioEngine::triggerCountdownAudio(app_);
+                }
             } else if (gameUI_.getState() == GameState::PLAYING) {
                 // 2. Unproject screen touch to 3D ray for Cube Picking
                 float proj[16], view[16], viewProj[16], invViewProj[16];

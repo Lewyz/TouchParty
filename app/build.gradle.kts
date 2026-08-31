@@ -1,6 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        load(localPropertiesFile.inputStream())
+    }
+}
+
+val gameServerHttpUrl = localProperties.getProperty("GAME_SERVER_HTTP_URL") ?: "https://game.tutaxi502.com"
+val gameServerWsUrl = localProperties.getProperty("GAME_SERVER_WS_URL") ?: "wss://game.tutaxi502.com"
 
 android {
     namespace = "com.lewyzstudio.touchparty"
@@ -16,6 +28,18 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "GAME_SERVER_HTTP_URL", "\"$gameServerHttpUrl\"")
+        buildConfigField("String", "GAME_SERVER_WS_URL", "\"$gameServerWsUrl\"")
+
+        externalNativeBuild {
+            cmake {
+                arguments(
+                    "-DGAME_SERVER_HTTP_URL=$gameServerHttpUrl",
+                    "-DGAME_SERVER_WS_URL=$gameServerWsUrl"
+                )
+            }
+        }
     }
 
     buildTypes {
@@ -31,6 +55,7 @@ android {
     }
     buildFeatures {
         prefab = true
+        buildConfig = true
     }
     externalNativeBuild {
         cmake {

@@ -5,6 +5,13 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("touchparty")
 
+if(NOT DEFINED GAME_SERVER_HTTP_URL)
+    set(GAME_SERVER_HTTP_URL "https://game.tutaxi502.com")
+endif()
+if(NOT DEFINED GAME_SERVER_WS_URL)
+    set(GAME_SERVER_WS_URL "wss://game.tutaxi502.com")
+endif()
+
 # Creates your game shared library. The name must be the same as the
 # one used for loading in your Kotlin/Java or AndroidManifest.txt files.
 add_library(touchparty SHARED
@@ -13,7 +20,13 @@ add_library(touchparty SHARED
         Renderer.cpp
         Shader.cpp
         TextureAsset.cpp
+        FontRenderer.cpp
         Utility.cpp)
+
+target_compile_definitions(touchparty PRIVATE
+        GAME_SERVER_HTTP_URL="${GAME_SERVER_HTTP_URL}"
+        GAME_SERVER_WS_URL="${GAME_SERVER_WS_URL}"
+)
 
 # Searches for a package provided by the game activity dependency
 find_package(game-activity REQUIRED CONFIG)

@@ -1,15 +1,19 @@
 package com.lewyzstudio.touchparty
 
+import android.app.AlertDialog
+import android.content.Context
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.text.InputType
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.widget.EditText
 import com.google.androidgamesdk.GameActivity
 
 class MainActivity : GameActivity() {
@@ -17,6 +21,9 @@ class MainActivity : GameActivity() {
         init {
             System.loadLibrary("touchparty")
         }
+
+        @JvmStatic
+        external fun nativeOnTextInputResult(fieldType: Int, text: String)
     }
 
     private var vibrator: Vibrator? = null
@@ -36,6 +43,57 @@ class MainActivity : GameActivity() {
         } else {
             @Suppress("DEPRECATION")
             getSystemService(VIBRATOR_SERVICE) as Vibrator
+        }
+
+        checkAndPromptInitialNickname()
+    }
+
+    private fun checkAndPromptInitialNickname() {
+        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
+        val savedNick = prefs.getString("user_nickname", null)
+        if (savedNick.isNullOrEmpty()) {
+            showTextInputDialog(0, "BIENVENIDO A TOUCHPARTY", "JUGADOR_1")
+        }
+    }
+
+    fun getSavedNickname(): String {
+        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
+        return prefs.getString("user_nickname", "JUGADOR_1") ?: "JUGADOR_1"
+    }
+
+    fun saveNickname(nick: String) {
+        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("user_nickname", nick).apply()
+    }
+
+    fun showTextInputDialog(fieldType: Int, title: String, currentText: String) {
+        runOnUiThread {
+            val builder = AlertDialog.Builder(this)
+            builder.setTitle(title)
+
+            val input = EditText(this)
+            input.setText(currentText)
+            if (fieldType == 2) {
+                input.inputType = InputType.TYPE_CLASS_NUMBER
+            } else {
+                input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            }
+            input.setSelection(input.text.length)
+            builder.setView(input)
+
+            builder.setPositiveButton("ACEPTAR") { _, _ ->
+                val enteredText = input.text.toString().trim()
+                if (enteredText.isNotEmpty()) {
+                    if (fieldType == 0) {
+                        saveNickname(enteredText)
+                    }
+                    nativeOnTextInputResult(fieldType, enteredText)
+                }
+            }
+            builder.setNegativeButton("CANCELAR") { dialog, _ ->
+                dialog.cancel()
+            }
+            builder.show()
         }
     }
 

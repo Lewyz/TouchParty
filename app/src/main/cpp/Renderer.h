@@ -33,6 +33,8 @@ public:
     void handleInput();
     void render();
 
+    GameUI& getUI() { return gameUI_; }
+
 private:
     void initRenderer();
     void updateRenderArea();
