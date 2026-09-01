@@ -45,8 +45,16 @@ object GameWebSocketManager {
             override fun onOpen(ws: WebSocket, response: Response) {
                 Log.d(TAG, "WebSocket connected successfully!")
                 isConnected = true
-                // Auto-fetch rooms on initial connection
-                listRooms()
+                val activeRoom = currentRoomId
+                val nick = MainActivity.instance?.getSavedNickname() ?: ""
+                val devId = MainActivity.instance?.getAppDeviceId() ?: ""
+                if (!activeRoom.isNullOrEmpty() && nick.isNotEmpty()) {
+                    Log.d(TAG, "Auto-rejoining room '$activeRoom' after WS reconnect")
+                    joinRoom(activeRoom, "", nick, devId)
+                } else {
+                    // Auto-fetch rooms on initial connection
+                    listRooms()
+                }
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
@@ -107,6 +115,26 @@ object GameWebSocketManager {
                 "game_started" -> {
                     MainActivity.sendStartGameToNative()
                 }
+                "game_over" -> {
+                    val roomObj = json.optJSONObject("room")
+                    val roomId = json.optString("roomId", currentRoomId ?: "")
+                    if (roomObj != null) {
+                        val roomName = roomObj.optString("name", "")
+                        val playerCount = roomObj.optInt("playerCount", 1)
+                        val isPrivate = roomObj.optBoolean("isPrivate", false)
+                        val ownerId = roomObj.optString("ownerId", "")
+                        val state = "FINISHED"
+
+                        val isOwner = if (!myPlayerId.isNullOrEmpty() && ownerId.isNotEmpty()) (myPlayerId == ownerId) else isRoomOwner
+
+                        val playersArray = roomObj.optJSONArray("players")
+                        val playersJson = playersArray?.toString() ?: "[]"
+
+                        MainActivity.sendRoomStateToNative(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson)
+                    } else {
+                        MainActivity.sendRoomStateToNative(roomId, "", 1, false, "", isRoomOwner, "FINISHED", "[]")
+                    }
+                }
                 "room_state" -> {
                     val roomObj = json.optJSONObject("room")
                     if (roomObj != null) {
@@ -150,7 +178,9 @@ object GameWebSocketManager {
                 "error" -> {
                     val errorMsg = json.optString("error", "Unknown server error")
                     Log.w(TAG, "Server reported error: $errorMsg")
-                    MainActivity.showToast(errorMsg)
+                    if (!errorMsg.contains("Game is not active", ignoreCase = true)) {
+                        MainActivity.showToast(errorMsg)
+                    }
                 }
             }
         } catch (e: Exception) {

@@ -253,9 +253,7 @@ private:
                 cube.col = c;
                 cube.basePos = Vec3(startX + c * GRID_SPACING, 0.0f, startZ + r * GRID_SPACING);
                 cube.state = CUBE_STATE_WHITE;
-                cube.isObstacle = (c == 3 && r == 3) || (c == 8 && r == 3) ||
-                                  (c == 3 && r == 6) || (c == 8 && r == 6) ||
-                                  (c == 5 && r == 4) || (c == 6 && r == 5);
+                cube.isObstacle = false;
                 cubes_.push_back(cube);
             }
         }

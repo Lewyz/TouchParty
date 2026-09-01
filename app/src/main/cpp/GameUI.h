@@ -88,7 +88,8 @@ public:
           roomListScrollOffset_(0),
           joinNotificationTimer_(0.0f),
           showLeaveConfirmModal_(false),
-          pendingJoinRoom_(false) {
+          pendingJoinRoom_(false),
+          reconnectTimer_(0.0f) {
         initQuadGeometry();
         initMiniCubeGeometry();
         // Server rooms are populated ONLY from real server responses (0 fake rooms!)
@@ -220,10 +221,19 @@ public:
         }
     }
 
-    void onRoomStateUpdated(const std::string& name, int playerCount, bool isPrivate, const std::string& ownerId, bool isOwner, const std::string& playersJson) {
+    void onRoomStateUpdated(const std::string& name, int playerCount, bool isPrivate, const std::string& ownerId, bool isOwner, const std::string& state, const std::string& playersJson) {
         if (!name.empty()) roomName_ = name;
         isPrivateRoom_ = isPrivate;
         ownerId_ = ownerId;
+
+        if (state == "FINISHED") {
+            state_ = GameState::MATCH_OVER;
+        } else if (state == "PLAYING" && (state_ == GameState::ROOM_LOBBY || state_ == GameState::COUNTDOWN || state_ == GameState::WELCOME)) {
+            state_ = GameState::PLAYING;
+            reconnectTimer_ = 0.0f;
+        } else if (state == "LOBBY" && state_ == GameState::MATCH_OVER) {
+            state_ = GameState::ROOM_LOBBY;
+        }
 
         // Parse players JSON array from server: [{"id":"...","name":"..."},...]
         currentRoomPlayers_.clear();
@@ -310,11 +320,20 @@ public:
                 matchTimer_ = 90.0f;
             }
         } else if (state_ == GameState::PLAYING) {
-            matchTimer_ -= deltaTime;
-            if (matchTimer_ <= 0.0f) {
-                matchTimer_ = 0.0f;
-                state_ = GameState::MATCH_OVER;
-                if (audioEngine) audioEngine->playGoChime();
+            if (!isServerConnected_) {
+                reconnectTimer_ += deltaTime;
+                if (reconnectTimer_ >= 15.0f) {
+                    reconnectTimer_ = 0.0f;
+                    state_ = GameState::WELCOME;
+                }
+            } else {
+                reconnectTimer_ = 0.0f;
+                matchTimer_ -= deltaTime;
+                if (matchTimer_ <= 0.0f) {
+                    matchTimer_ = 0.0f;
+                    state_ = GameState::MATCH_OVER;
+                    if (audioEngine) audioEngine->playGoChime();
+                }
             }
         }
     }
@@ -345,18 +364,18 @@ public:
             return TouchAction::NONE;
         }
 
-        // 1. Reset / Exit Match check
+        // 1. In-Game Leave check (Shows confirmation modal!)
         if (state_ == GameState::COUNTDOWN || state_ == GameState::PLAYING || state_ == GameState::MATCH_OVER) {
             float resetX = -aspect + 0.28f;
-            float resetY = 0.65f;
+            float resetY = -0.82f;
             float resetW = 0.38f;
-            float resetH = 0.14f;
+            float resetH = 0.12f;
 
-            if (std::abs(normX - resetX) <= resetW * 0.5f + 0.03f &&
-                std::abs(normY - resetY) <= resetH * 0.5f + 0.03f) {
-                state_ = GameState::WELCOME;
+            if (std::abs(normX - resetX) <= resetW * 0.5f + 0.04f &&
+                std::abs(normY - resetY) <= resetH * 0.5f + 0.04f) {
+                showLeaveConfirmModal_ = true;
                 if (audioEngine) audioEngine->playCountdownBeep();
-                return TouchAction::RESET;
+                return TouchAction::NONE;
             }
         }
 
@@ -533,17 +552,22 @@ public:
                 return TouchAction::BACK_TO_WELCOME;
             }
         }
-        // 6. MATCH OVER Touch
+        // 6. MATCH OVER Touch (Only Leader can press OTRA VEZ)
         else if (state_ == GameState::MATCH_OVER) {
             float playAgainX = 0.0f;
-            float playAgainY = -0.20f;
-            float playAgainW = 0.55f;
-            float playAgainH = 0.16f;
+            float playAgainY = -0.24f;
+            float playAgainW = 0.62f;
+            float playAgainH = 0.15f;
 
-            if (std::abs(normX - playAgainX) <= playAgainW * 0.5f + 0.04f &&
-                std::abs(normY - playAgainY) <= playAgainH * 0.5f + 0.04f) {
-                startCountdown(audioEngine);
-                return TouchAction::PLAY;
+            if (std::abs(normX - playAgainX) <= playAgainW * 0.5f + 0.05f &&
+                std::abs(normY - playAgainY) <= playAgainH * 0.5f + 0.05f) {
+                if (isOwner_) {
+                    if (audioEngine) audioEngine->playCountdownBeep();
+                    return TouchAction::START_MULTIPLAYER_GAME;
+                } else {
+                    if (audioEngine) audioEngine->playCountdownBeep();
+                    return TouchAction::NONE;
+                }
             }
         }
 
@@ -557,10 +581,13 @@ public:
 
         shader.setUseTexture(false);
 
-        // 1. Top Score Panels & Timer (only during active 3D gameplay states)
+        // 1. Top Score Panels, Timer & In-Game Leave Button (during active 3D gameplay states)
         if (state_ == GameState::COUNTDOWN || state_ == GameState::PLAYING || state_ == GameState::MATCH_OVER) {
             renderTopScorePanels(shader, ortho, aspect, redCount, blueCount);
             renderMatchTimerDisplay(shader, ortho);
+            if (state_ == GameState::PLAYING || state_ == GameState::COUNTDOWN) {
+                renderBackButton(shader, ortho, aspect);
+            }
         } else {
             // Render Global Server Connection Banner on all Menu Screens
             renderServerStatusBanner(shader, ortho, aspect);
@@ -592,6 +619,8 @@ public:
         // 3. Render Modal Confirm Overlay if active
         if (showLeaveConfirmModal_) {
             renderLeaveConfirmModal(shader, ortho, aspect);
+        } else if (state_ == GameState::PLAYING && !isServerConnected_) {
+            renderReconnectingOverlay(shader, ortho, aspect);
         }
     }
 
@@ -987,15 +1016,23 @@ private:
         drawQuad(shader, ortho, cx, scoreY, 0.01f, 0.08f, 0.5f, 0.5f, 0.6f, 0.8f);
         drawDigits(shader, ortho, cx + 0.12f, scoreY, blueCount, 0.25f, 0.68f, 1.0f);
 
-        // 4. "PLAY AGAIN" Button
+        // 4. "OTRA VEZ" Button (for Leader) or "ESPERANDO AL LÍDER..." Card (for Member)
         float btnX = cx;
         float btnY = cy - 0.24f;
-        float btnW = 0.58f;
+        float btnW = 0.62f;
         float btnH = 0.15f;
 
-        drawQuad(shader, ortho, btnX, btnY, btnW, btnH, 0.12f, 0.45f, 0.90f, 0.95f);
-        drawQuad(shader, ortho, btnX, btnY - btnH * 0.5f, btnW, 0.01f, 0.6f, 0.85f, 1.0f, 0.95f);
-        drawTextString(shader, ortho, btnX, btnY, Strings::get(StringId::PLAY_AGAIN), 0.115f, 1.0f, 1.0f, 1.0f);
+        if (isOwner_) {
+            drawQuad(shader, ortho, btnX, btnY, btnW, btnH, 0.12f, 0.75f, 0.35f, 0.95f);
+            drawQuad(shader, ortho, btnX, btnY - btnH * 0.5f, btnW, 0.01f, 0.40f, 0.95f, 0.60f, 0.95f);
+            std::string btnStr = (Strings::getLanguage() == Language::SPANISH) ? "OTRA VEZ" : "PLAY AGAIN";
+            drawTextString(shader, ortho, btnX, btnY, btnStr, 0.118f, 1.0f, 1.0f, 1.0f);
+        } else {
+            drawQuad(shader, ortho, btnX, btnY, btnW, btnH, 0.14f, 0.18f, 0.25f, 0.92f);
+            drawQuad(shader, ortho, btnX, btnY - btnH * 0.5f, btnW, 0.01f, 0.20f, 0.80f, 1.0f, 0.95f);
+            std::string waitStr = (Strings::getLanguage() == Language::SPANISH) ? "ESPERANDO AL LÍDER..." : "WAITING FOR LEADER...";
+            drawTextString(shader, ortho, btnX, btnY, waitStr, 0.098f, 0.80f, 0.90f, 1.0f);
+        }
     }
 
     void renderLeaveConfirmModal(const Shader& shader, const float* ortho, float aspect) const {
@@ -1031,6 +1068,15 @@ private:
         drawQuad(shader, ortho, noX, noY - btnH * 0.5f, btnW, 0.01f, 0.40f, 0.95f, 0.70f, 0.95f);
         std::string noStr = (Strings::getLanguage() == Language::SPANISH) ? "CANCELAR" : "CANCEL";
         drawTextString(shader, ortho, noX, noY, noStr, 0.105f, 1.0f, 1.0f, 1.0f);
+    }
+
+    void renderReconnectingOverlay(const Shader& shader, const float* ortho, float aspect) const {
+        float banX = 0.0f, banY = 0.0f, banW = 1.65f, banH = 0.35f;
+        drawQuad(shader, ortho, banX, banY, banW, banH, 0.12f, 0.14f, 0.22f, 0.94f);
+        drawQuad(shader, ortho, banX, banY - banH * 0.5f, banW, 0.01f, 1.0f, 0.60f, 0.10f, 0.95f);
+        int secsLeft = std::max(0, 15 - static_cast<int>(reconnectTimer_));
+        std::string msg = "RECONECTANDO A LA PARTIDA... (" + std::to_string(secsLeft) + "s)";
+        drawTextString(shader, ortho, banX, banY, msg, 0.115f, 1.0f, 0.85f, 0.20f);
     }
 
     void renderTopScorePanels(const Shader& shader, const float* ortho, float aspect, int redCount, int blueCount) const {
@@ -1248,6 +1294,7 @@ private:
     std::string joinNotificationText_;
     float joinNotificationTimer_;
     bool showLeaveConfirmModal_;
+    float reconnectTimer_;
     FontRenderer fontRenderer_;
 
     std::vector<Vertex> quadVertices_;

@@ -65,11 +65,13 @@ Java_com_lewyzstudio_touchparty_MainActivity_nativeOnRoomStateUpdated(
     if (!g_pRenderer) return JNI_FALSE;
     const char *nativeName = env->GetStringUTFChars(roomName, nullptr);
     const char *nativeOwnerId = env->GetStringUTFChars(ownerId, nullptr);
+    const char *nativeState = env->GetStringUTFChars(state, nullptr);
     const char *nativePlayersJson = env->GetStringUTFChars(playersJson, nullptr);
-    if (nativeName && nativeOwnerId && nativePlayersJson) {
-        g_pRenderer->getUI().onRoomStateUpdated(nativeName, playerCount, isPrivate == JNI_TRUE, nativeOwnerId, isOwner == JNI_TRUE, nativePlayersJson);
+    if (nativeName && nativeOwnerId && nativeState && nativePlayersJson) {
+        g_pRenderer->getUI().onRoomStateUpdated(nativeName, playerCount, isPrivate == JNI_TRUE, nativeOwnerId, isOwner == JNI_TRUE, nativeState, nativePlayersJson);
         env->ReleaseStringUTFChars(roomName, nativeName);
         env->ReleaseStringUTFChars(ownerId, nativeOwnerId);
+        env->ReleaseStringUTFChars(state, nativeState);
         env->ReleaseStringUTFChars(playersJson, nativePlayersJson);
         return JNI_TRUE;
     }

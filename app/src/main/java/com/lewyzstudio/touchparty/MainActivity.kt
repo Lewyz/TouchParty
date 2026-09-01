@@ -22,7 +22,7 @@ import java.net.URL
 class MainActivity : GameActivity() {
     companion object {
         @Volatile
-        private var instance: MainActivity? = null
+        var instance: MainActivity? = null
 
         fun showToast(message: String) {
             instance?.runOnUiThread {

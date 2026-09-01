@@ -313,7 +313,7 @@ void Renderer::handleInput() {
                     particleSystem_.clear();
                     AudioEngine::triggerCountdownAudio(app_);
                 }
-            } else if (gameUI_.getState() == GameState::PLAYING) {
+            } else if (gameUI_.getState() == GameState::PLAYING && gameUI_.isServerConnected()) {
                 // 2. Unproject screen touch to 3D ray for Cube Picking
                 float proj[16], view[16], viewProj[16], invViewProj[16];
                 computeCameraMatrices(float(width_), float(height_), proj, view, viewProj);
