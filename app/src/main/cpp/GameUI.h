@@ -464,9 +464,9 @@ public:
         // 5. ROOM LIST Screen Touch (Scrollable & Filterable)
         else if (state_ == GameState::ROOM_LIST) {
             // Filter Selector Box
-            float filterX = -0.15f, filterY = 0.20f, filterW = 0.70f, filterH = 0.10f;
-            if (std::abs(normX - filterX) <= filterW * 0.5f + 0.04f &&
-                std::abs(normY - filterY) <= filterH * 0.5f + 0.04f) {
+            float filterX = -0.30f, filterY = 0.28f, filterW = 0.95f, filterH = 0.13f;
+            if (std::abs(normX - filterX) <= filterW * 0.5f + 0.05f &&
+                std::abs(normY - filterY) <= filterH * 0.5f + 0.05f) {
                 filterTypeIndex_ = (filterTypeIndex_ + 1) % 3;
                 roomListScrollOffset_ = 0;
                 if (audioEngine) audioEngine->playCountdownBeep();
@@ -474,31 +474,31 @@ public:
             }
 
             // Scroll Up / Down Buttons
-            float scrollX = 0.52f, scrollW = 0.22f, scrollH = 0.10f;
-            float upY = 0.20f, downY = -0.22f;
+            float scrollX = 0.72f, scrollW = 0.40f, scrollH = 0.13f;
+            float upY = 0.28f, downY = -0.28f;
 
-            if (std::abs(normX - scrollX) <= scrollW * 0.5f + 0.04f &&
-                std::abs(normY - upY) <= scrollH * 0.5f + 0.04f) {
+            if (std::abs(normX - scrollX) <= scrollW * 0.5f + 0.05f &&
+                std::abs(normY - upY) <= scrollH * 0.5f + 0.05f) {
                 roomListScrollOffset_ = std::max(0, roomListScrollOffset_ - 1);
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::SCROLL_UP_ROOMS;
             }
-            if (std::abs(normX - scrollX) <= scrollW * 0.5f + 0.04f &&
-                std::abs(normY - downY) <= scrollH * 0.5f + 0.04f) {
+            if (std::abs(normX - scrollX) <= scrollW * 0.5f + 0.05f &&
+                std::abs(normY - downY) <= scrollH * 0.5f + 0.05f) {
                 roomListScrollOffset_++;
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::SCROLL_DOWN_ROOMS;
             }
 
-            // Join Room Buttons for visible real items
+            // Join Room Buttons for visible real items (Expanded green button tap area!)
             auto filtered = getFilteredRooms();
-            float joinX = 0.42f, joinW = 0.32f, joinH = 0.11f;
-            float startY = 0.06f;
+            float joinX = 0.72f, joinW = 0.40f, joinH = 0.16f;
+            float startY = 0.08f;
 
             for (size_t i = 0; i < 3 && (i + roomListScrollOffset_) < filtered.size(); ++i) {
-                float rowY = startY - static_cast<float>(i) * 0.14f;
-                if (std::abs(normX - joinX) <= joinW * 0.5f + 0.04f &&
-                    std::abs(normY - rowY) <= joinH * 0.5f + 0.04f) {
+                float rowY = startY - static_cast<float>(i) * 0.18f;
+                if (std::abs(normX - joinX) <= joinW * 0.5f + 0.06f &&
+                    std::abs(normY - rowY) <= joinH * 0.5f + 0.05f) {
                     const auto& room = filtered[i + roomListScrollOffset_];
                     selectedRoomId_ = room.id;
                     roomName_ = room.name;
@@ -517,9 +517,9 @@ public:
             }
 
             // ACTUALIZAR Button
-            float refX = 0.0f, refY = -0.38f, refW = 0.55f, refH = 0.12f;
-            if (std::abs(normX - refX) <= refW * 0.5f + 0.04f &&
-                std::abs(normY - refY) <= refH * 0.5f + 0.04f) {
+            float refX = 0.0f, refY = -0.48f, refW = 0.65f, refH = 0.14f;
+            if (std::abs(normX - refX) <= refW * 0.5f + 0.05f &&
+                std::abs(normY - refY) <= refH * 0.5f + 0.05f) {
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::REFRESH_ROOMS;
             }
@@ -827,16 +827,16 @@ private:
     }
 
     void renderRoomListScreen(const Shader& shader, const float* ortho, float aspect) const {
-        float cx = 0.0f, cy = -0.03f;
-        float cardW = 2.20f, cardH = 1.20f;
+        float cx = 0.0f, cy = -0.02f;
+        float cardW = 2.45f, cardH = 1.35f;
 
         // Container card (Expanded landscape layout)
         drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.08f, 0.11f, 0.18f, 0.94f);
-        drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
-        drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
+        drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.014f, 0.10f, 0.70f, 1.0f, 0.95f);
+        drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.014f, 0.10f, 0.70f, 1.0f, 0.95f);
 
         // Title
-        drawTextString(shader, ortho, cx, cy + 0.42f, Strings::get(StringId::AVAILABLE_ROOMS_TITLE), 0.160f, 0.20f, 0.90f, 1.0f);
+        drawTextString(shader, ortho, cx, cy + 0.48f, Strings::get(StringId::AVAILABLE_ROOMS_TITLE), 0.165f, 0.20f, 0.90f, 1.0f);
 
         // Search / Filter Selector Box
         std::vector<std::string> filterNames = {
@@ -844,27 +844,27 @@ private:
             "BUSCAR: " + Strings::get(StringId::FILTER_PUBLIC),
             "BUSCAR: " + Strings::get(StringId::FILTER_PRIVATE)
         };
-        float filterX = -0.30f, filterY = 0.26f, filterW = 0.90f, filterH = 0.12f;
+        float filterX = -0.30f, filterY = 0.28f, filterW = 0.95f, filterH = 0.13f;
         drawQuad(shader, ortho, filterX, filterY, filterW, filterH, 0.12f, 0.16f, 0.24f, 0.92f);
-        drawTextString(shader, ortho, filterX, filterY, filterNames[filterTypeIndex_], 0.108f, 0.80f, 0.90f, 1.0f);
+        drawTextString(shader, ortho, filterX, filterY, filterNames[filterTypeIndex_], 0.110f, 0.80f, 0.90f, 1.0f);
 
         // Scroll Up ▲ & Scroll Down ▼ Control Buttons
-        float scrollX = 0.65f, scrollW = 0.35f, scrollH = 0.12f;
-        float upY = 0.26f, downY = -0.26f;
+        float scrollX = 0.72f, scrollW = 0.40f, scrollH = 0.13f;
+        float upY = 0.28f, downY = -0.28f;
         drawQuad(shader, ortho, scrollX, upY, scrollW, scrollH, 0.14f, 0.22f, 0.35f, 0.92f);
-        drawTextString(shader, ortho, scrollX, upY, Strings::get(StringId::SCROLL_UP), 0.108f, 1.0f, 1.0f, 1.0f);
+        drawTextString(shader, ortho, scrollX, upY, Strings::get(StringId::SCROLL_UP), 0.110f, 1.0f, 1.0f, 1.0f);
 
         drawQuad(shader, ortho, scrollX, downY, scrollW, scrollH, 0.14f, 0.22f, 0.35f, 0.92f);
-        drawTextString(shader, ortho, scrollX, downY, Strings::get(StringId::SCROLL_DOWN), 0.108f, 1.0f, 1.0f, 1.0f);
+        drawTextString(shader, ortho, scrollX, downY, Strings::get(StringId::SCROLL_DOWN), 0.110f, 1.0f, 1.0f, 1.0f);
 
         // Filter Rooms
         auto filtered = getFilteredRooms();
 
         if (filtered.empty()) {
             float emptyY = -0.04f;
-            drawQuad(shader, ortho, 0.0f, emptyY, 1.50f, 0.28f, 0.12f, 0.15f, 0.22f, 0.92f);
-            drawTextString(shader, ortho, 0.0f, emptyY + 0.05f, Strings::get(StringId::EMPTY_ROOMS_LINE1), 0.105f, 1.0f, 0.45f, 0.35f);
-            drawTextString(shader, ortho, 0.0f, emptyY - 0.05f, Strings::get(StringId::EMPTY_ROOMS_LINE2), 0.098f, 0.60f, 0.80f, 1.0f);
+            drawQuad(shader, ortho, 0.0f, emptyY, 1.60f, 0.30f, 0.12f, 0.15f, 0.22f, 0.92f);
+            drawTextString(shader, ortho, 0.0f, emptyY + 0.06f, Strings::get(StringId::EMPTY_ROOMS_LINE1), 0.110f, 1.0f, 0.45f, 0.35f);
+            drawTextString(shader, ortho, 0.0f, emptyY - 0.06f, Strings::get(StringId::EMPTY_ROOMS_LINE2), 0.100f, 0.60f, 0.80f, 1.0f);
         } else {
             // Render visible real room rows with scroll offset
             float startY = 0.08f;
@@ -873,29 +873,29 @@ private:
 
             for (size_t i = 0; i < maxVisible && (startIndex + i) < filtered.size(); ++i) {
                 const auto& room = filtered[startIndex + i];
-                float rowY = startY - static_cast<float>(i) * 0.17f;
+                float rowY = startY - static_cast<float>(i) * 0.18f;
 
                 // Room info box (Clean name without "PUBLICAS"/"PRIVADAS" appended!)
-                drawQuad(shader, ortho, -0.20f, rowY, 1.25f, 0.14f, 0.13f, 0.17f, 0.25f, 0.92f);
+                drawQuad(shader, ortho, -0.20f, rowY, 1.30f, 0.16f, 0.13f, 0.17f, 0.25f, 0.92f);
                 std::string label = room.name + " (" + std::to_string(room.playerCount) + "/" + std::to_string(room.maxPlayers) + ")";
 
                 // Private rooms: Bright Orange text. Public rooms: Bright Cyan text.
                 float r = room.isPrivate ? 1.00f : 0.20f;
                 float g = room.isPrivate ? 0.55f : 0.90f;
                 float b = room.isPrivate ? 0.10f : 1.00f;
-                drawTextString(shader, ortho, -0.20f, rowY, label, 0.108f, r, g, b);
+                drawTextString(shader, ortho, -0.20f, rowY, label, 0.112f, r, g, b);
 
                 // Join button (PIN for private, UNIRSE for public)
-                drawQuad(shader, ortho, 0.65f, rowY, 0.35f, 0.14f, 0.15f, 0.75f, 0.35f, 0.95f);
+                drawQuad(shader, ortho, 0.72f, rowY, 0.40f, 0.16f, 0.12f, 0.78f, 0.35f, 0.95f);
                 std::string btnText = room.isPrivate ? "PIN" : Strings::get(StringId::JOIN_ROOM);
-                drawTextString(shader, ortho, 0.65f, rowY, btnText, 0.115f, 1.0f, 1.0f, 1.0f);
+                drawTextString(shader, ortho, 0.72f, rowY, btnText, 0.122f, 1.0f, 1.0f, 1.0f);
             }
         }
 
         // ACTUALIZAR Button
-        float refX = 0.0f, refY = -0.38f, refW = 0.55f, refH = 0.12f;
+        float refX = 0.0f, refY = -0.48f, refW = 0.65f, refH = 0.14f;
         drawQuad(shader, ortho, refX, refY, refW, refH, 0.12f, 0.45f, 0.85f, 0.95f);
-        drawTextString(shader, ortho, refX, refY, Strings::get(StringId::REFRESH), 0.102f, 1.0f, 1.0f, 1.0f);
+        drawTextString(shader, ortho, refX, refY, Strings::get(StringId::REFRESH), 0.110f, 1.0f, 1.0f, 1.0f);
 
         // VOLVER Button (Bottom Left)
         renderBackButton(shader, ortho, aspect);
