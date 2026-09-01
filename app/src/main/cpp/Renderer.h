@@ -34,6 +34,7 @@ public:
     void render();
 
     GameUI& getUI() { return gameUI_; }
+    CubeGrid& getCubeGrid() { return cubeGrid_; }
 
 private:
     void initRenderer();

@@ -16,6 +16,9 @@ extern "C" {
 void nativeWsRequestCreateRoom(android_app* app, const std::string& name, bool isPrivate, const std::string& pin);
 void nativeWsRequestListRooms(android_app* app);
 void nativeWsRequestJoinRoom(android_app* app, const std::string& roomId, const std::string& pin);
+void nativeWsRequestLeaveRoom(android_app* app);
+void nativeWsRequestStartGame(android_app* app);
+void nativeWsSendTap(android_app* app, int x, int y);
 }
 
 static const char *vertex = R"vertex(#version 300 es
@@ -267,6 +270,10 @@ void Renderer::updateRenderArea() {
 }
 
 void Renderer::handleInput() {
+    if (gameUI_.checkAndClearPendingJoinRoom()) {
+        nativeWsRequestJoinRoom(app_, gameUI_.getSelectedRoomId(), gameUI_.getRoomPin());
+    }
+
     auto *inputBuffer = android_app_swap_input_buffers(app_);
     if (!inputBuffer) return;
 
@@ -292,6 +299,10 @@ void Renderer::handleInput() {
                 nativeWsRequestListRooms(app_);
             } else if (uiAction == TouchAction::JOIN_SELECTED_ROOM) {
                 nativeWsRequestJoinRoom(app_, gameUI_.getSelectedRoomId(), gameUI_.getRoomPin());
+            } else if (uiAction == TouchAction::LEAVE_ROOM_LOBBY || uiAction == TouchAction::BACK_TO_WELCOME) {
+                nativeWsRequestLeaveRoom(app_);
+            } else if (uiAction == TouchAction::START_MULTIPLAYER_GAME) {
+                nativeWsRequestStartGame(app_);
             }
 
             if (uiAction == TouchAction::RESET || uiAction == TouchAction::START_LOCAL_GAME ||
@@ -315,9 +326,14 @@ void Renderer::handleInput() {
                     if (pickedCube != -1) {
                         Vec3 cubePos;
                         CubeState newState;
-                        if (cubeGrid_.tapCube(pickedCube, cubePos, newState)) {
+                        bool isPlayerOne = gameUI_.isOwner();
+                        if (cubeGrid_.tapCube(pickedCube, cubePos, newState, isPlayerOne)) {
                             audioEngine_.playTapSound(static_cast<int>(newState));
                             VibrationEngine::triggerVibration(app_, static_cast<int>(newState));
+
+                            int col = pickedCube % CubeGrid::COLS;
+                            int row = pickedCube / CubeGrid::COLS;
+                            nativeWsSendTap(app_, col, row);
 
                             if (newState == CUBE_STATE_BLUE) {
                                 particleSystem_.spawnWave(cubePos, 0.05f, 0.55f, 1.0f);

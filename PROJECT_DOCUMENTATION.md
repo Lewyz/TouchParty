@@ -1,6 +1,6 @@
 # Project Documentation - Touchparty 3D Game Engine
 
-Comprehensive technical documentation for the **Touchparty** Android 3D Game Engine built with C++20, OpenGL ES 3.0, and GameActivity.
+Comprehensive technical documentation for the **Touchparty** Android 3D Game Engine built with C++20, OpenGL ES 3.0, GameActivity, and OkHttp WebSocket real-time multiplayer networking.
 
 ---
 
@@ -14,6 +14,10 @@ Comprehensive technical documentation for the **Touchparty** Android 3D Game Eng
 - **Input & Haptics**:
   - `GameActivity` motion event polling
   - Android NDK JNI bridge to `Vibrator` / `VibratorManager`
+- **Networking & Real-Time Sync**:
+  - **OkHttp 4.12.0 WebSocket** client (`wss://game.tutaxi502.com`)
+  - **Node.js ES Module Backend** (`/Users/lewyz/Downloads/home/admin/game-server/`)
+  - **JNI Thread-Safe Bridge** between Kotlin and C++ engine
 - **Window & Layout**: Immersive Sticky Fullscreen Landscape (`NoActionBar` theme, display cutout support)
 
 ---
@@ -23,12 +27,12 @@ Comprehensive technical documentation for the **Touchparty** Android 3D Game Eng
 ```
 app/src/main/
 ├── cpp/
-│   ├── main.cpp              # GameActivity entry point & ALooper event loop
-│   ├── Renderer.h / .cpp     # Render pipeline, camera matrices, EGL context, frame timing, input raycasting
+│   ├── main.cpp              # GameActivity entry point, JNI exports & ALooper event loop
+│   ├── Renderer.h / .cpp     # Render pipeline, camera matrices, EGL context, 3D raycast & WS triggers
 │   ├── MatrixMath.h          # Column-major 4x4 matrix math & 3D unprojection raycast algorithms
-│   ├── CubeGrid.h            # 12x10 3D cube grid (120 cubes), 3D floor platform, animations & rotation
+│   ├── CubeGrid.h            # 12x10 3D cube grid (120 cubes), 3D floor platform, animations & real-time sync
 │   ├── ParticleSystem.h      # Board-relative expanding shockwave particle system
-│   ├── GameUI.h              # 2D Orthographic UI (Score panels, 3D mini-cubes, timer, countdown, winner card)
+│   ├── GameUI.h              # 2D Orthographic UI (NickName badge, server status, room list, confirmation modal)
 │   ├── AudioEngine.h         # Procedural AAudio PCM synth & JNI MP3 trigger
 │   ├── VibrationEngine.h     # JNI bridge for device haptic feedback
 │   ├── Shader.h / .cpp       # GLES 3.0 shader program management (MVP, Color, Texture)
@@ -36,11 +40,19 @@ app/src/main/
 │   ├── Model.h / Utility.h   # Vertex structures and EGL/GL error helpers
 │   └── CMakeLists.txt        # Native C++ build script (links EGL, GLESv3, AAudio, GameActivity)
 ├── java/com/lewyzstudio/touchparty/
-│   └── MainActivity.kt       # GameActivity subclass, full-screen cutout, Vibrator & MediaPlayer integration
+│   ├── MainActivity.kt       # GameActivity subclass, health check loop, nickname persistence & JNI bridges
+│   └── GameWebSocketManager.kt # OkHttp WebSocket client, JSON message parser & real-time event router
 ├── assets/
 │   └── background_cubes.jpeg # Sci-fi laboratory background image texture
 └── res/raw/
     └── countdown_party.mp3   # Countdown audio track (3, 2, 1, GO!)
+
+Servidor Node.js Backend:
+/Users/lewyz/Downloads/home/admin/game-server/
+├── index.js                  # WebSocket server, HTTP /health endpoint, message router
+├── game.js                   # Room class, Player class, 12x10 board state & game logic
+├── package.json              # Node.js ES module package definition
+└── test.js                   # Unit tests for room lifecycle & game mechanics
 ```
 
 ---
@@ -48,84 +60,117 @@ app/src/main/
 ## 3. Core Engine Systems
 
 ### 3.1. 3D Camera & Matrix Math (`MatrixMath.h`, `Renderer.cpp`)
-- **Projection**: Perspective camera with adaptive FOV based on screen aspect ratio (`width / height`) so the entire 12x10 grid is visible on any display size.
+- **Projection**: Perspective camera with adaptive FOV based on screen aspect ratio (`width / height`).
 - **View Matrix**: LookAt camera positioned at `Vec3(0.0, 11.5, 10.5)` looking down at board center `Vec3(0.0, -0.4, 0.0)`.
-- **Unprojection / Raycasting**:
-  Converts 2D screen touch $(x, y)$ in pixels to normalized device coordinates (NDC) $[-1, 1]$, then applies inverse View-Projection matrix $(P \times V)^{-1}$ to generate a 3D Ray (origin & normalized direction).
+- **Unprojection / Raycasting**: Converts 2D screen touch $(x, y)$ in pixels to normalized device coordinates (NDC) $[-1, 1]$, applying inverse View-Projection matrix $(P \times V)^{-1}$ to generate a 3D Ray.
 
 ### 3.2. 12x10 Cube Grid & Platform (`CubeGrid.h`)
 - **Dimensions**: 12 columns $\times$ 10 rows = 120 cubes.
-- **Base Platform**: 3D metallic tech floor rendered underneath the grid with bevel borders (`R: 0.35, G: 0.40, B: 0.46`).
+- **Base Platform**: 3D metallic tech floor rendered underneath the grid.
 - **State Machine**:
-  - `CUBE_STATE_WHITE` (0): Base neutral state (uncounted).
+  - `CUBE_STATE_WHITE` (0): Base neutral state.
   - `CUBE_STATE_BLUE` (1): Blue state (+1 Blue score).
   - `CUBE_STATE_RED` (2): Red state (-1 Blue, +1 Red score).
-  - Tapping state 2 resets cube back to `WHITE` (-1 Red score).
-- **Animations**:
-  - Jump Y-offset: $\text{sin}(t \cdot \pi) \times 0.75\text{f}$ over $\sim 0.33$s.
-  - Spin Rotation: $t \times 360^\circ$ Y-axis rotation on touch.
-- **Rotating Difficulty (Half-Time)**:
-  When remaining match time $\le 15$s, the board smoothly rotates on its Y-axis (`boardRotationY_ += dt * 22.0f`).
-- **Rotation-Aware Raycasting**:
-  When picking cubes during board rotation, the incoming 3D Ray is inverse-rotated by $-\text{boardRotationY\_}$ around the Y-axis before testing against static cube AABBs. This achieves **100% picking precision** at any rotation angle.
+- **Real-Time Synchronized State**: `setCubeState(col, row, newState)` updates cell state instantly upon receiving WebSocket `room_state` board updates from Node.js server.
+- **Rotation-Aware Raycasting**: 100% picking precision at any rotation angle during half-time board rotation.
 
-### 3.3. Particle System (`ParticleSystem.h`)
-- Spawns expanding shockwave ring particles around tapped cubes.
-- Particles store local board coordinates and render with `boardRotationY_` matrix transformation, ensuring waves **continuously rotate in lockstep with the board** and stay attached to the tapped cube.
+### 3.3. User Interface & Overlay (`GameUI.h`)
+- **Server Status Banner**: Displays `SERVIDOR: CONECTADO` (green) or `SERVIDOR: DESCONECTADO (MODO LOCAL)` (red).
+- **Top-Right Registered NickName Badge**: Rendered in a crisp white background box (`1.0, 1.0, 1.0, 1.0`) with dark text and blue accent border. Non-editable once saved.
+- **Redesigned Room List (`renderRoomListScreen`)**:
+  - Title: `SALAS DISPONIBLES`.
+  - Filter Selector: `BUSCAR: TODAS` / `PUBLICAS` / `PRIVADAS` (sin acentos para compatibilidad de fuente).
+  - Displays visible room rows with player count (e.g. `room-name (1/8)`).
+  - **Salas Públicas**: Texto en cian brillante (`#33E6FF`) con botón `[UNIRSE]`.
+  - **Salas Privadas**: Texto en naranja brillante (`#FF8C1A`) con botón `[PIN]`.
+  - Deduplicación estricta por `entry.id` para evitar filas duplicadas.
+- **Redesigned Expanded Lobby Screen (`renderRoomLobbyScreen`)**:
+  - Escala ampliada (+50%) abarcando la pantalla landscape (`cardW = 2.65f`, `cardH = 1.25f`).
+  - **Columna Izquierda**: Estado de la sala, conteo `JUGADORES: X/8` y botón `INICIAR PARTIDA (X/8)` para el Creador o `ESPERANDO AL CREADOR...` para integrantes.
+  - **Columna Derecha (`INTEGRANTES DE LA SALA`)**: Lista en tiempo real de jugadores conectados. Creador destacado en dorado `[CREADOR] NickName` y miembros regulares en cian.
+- **Confirmation Exit Modal (`renderLeaveConfirmModal`)**:
+  - Displays `"¿DESEAS SALIR DE LA SALA?"` modal card when tapping "SALIR DE SALA" or "VOLVER" in lobby.
+  - `[SÍ, SALIR]` sends WebSocket `leave` to server, destroys room if empty, and returns to main menu.
+  - `[CANCELAR]` closes modal.
 
-### 3.4. User Interface Overlay (`GameUI.h`)
-- Rendered in a dedicated 2D orthographic overlay pass with depth testing disabled.
-- **Score Panels**: Top-Left panel (`RED: X`) and Top-Right panel (`BLUE: Y`) with animated **spinning 3D mini-cubes**.
-- **Reset Button**: Top-Left button directly below Red panel (`Y = 0.65f`) for quick match restart.
-- **Match Timer**: Top-Center digital clock (`00:30` $\rightarrow$ `00:00`) pulsing red when $\le 10$s.
-- **Play Button**: Centered circular button in `GameState::MENU`.
-- **Countdown Sequence**: Animated numbers `3`, `2`, `1`, `GO!` with scaling/alpha transitions.
-- **Winner Card Overlay (`GameState::MATCH_OVER`)**: Appears at `00:00`, locks cube input, announces winner ("RED WINS!", "BLUE WINS!", "DRAW!"), displays final scores, and provides a "PLAY AGAIN" button.
+### 3.4. Networking & Real-Time Sync (`GameWebSocketManager.kt`, `MainActivity.kt`, `index.js`)
+- **Server Health Check**: Background HTTP GET to `${BuildConfig.GAME_SERVER_HTTP_URL}/health` every 5s.
+- **Unique Device Identification (`deviceId`)**: UUID persistido en `SharedPreferences` que previene duplicación de usuarios (`Lewyz1` / `LEWYZ1`) al reconectar.
+- **Active Server Heartbeat & Ghost Room Audit (`cleanGhostRooms`)**:
+  - Ping/pong activo cada 5s en Node.js.
+  - Detecta sockets muertos/cerrados, remueve jugadores desconectados, reasigna `ownerId` al primer integrante activo o destruye salas vacías.
+- **Local NickName Persistence**: Stored in `SharedPreferences` (`"user_nickname"`). Prompted ONLY on first launch. Sent to C++ via thread-safe JNI retry loop.
+- **WebSocket Protocol**:
+  - `list_rooms` -> `rooms_list`: Populates `serverRooms_` vector dynamically in C++.
+  - `join` -> `joined` / `room_state`: Joins room, assigns stable player ID and unique color.
+  - `leave` / `leave_room` -> `left_room_confirmed`: Clean exit from room.
+  - `start` -> `game_started`: Synchronizes game start across all connected devices in room.
+  - `tap` -> `room_state`: Transmits 3D cube taps `(col, row)` and broadcasts updated 12x10 board to all players in that room in real time.
+- **Duplicate Room Name Check**: Server rejects creation if a room with the same name already exists.
+- **Nickname Disambiguation**: Auto-appends `02`, `03` (e.g. `Lewyz02`) if multiple players with identical nickname join the same room.
+- **Room Ownership Transfer**: If owner leaves, ownership automatically passes to the next player. If empty (`0` players), room is immediately destroyed on server (`rooms.delete(roomId)`).
 
-### 3.5. Audio Engine (`AudioEngine.h`, `MainActivity.kt`)
-- **Procedural Synthesizer (AAudio)**: Low-latency 44.1 kHz stereo PCM synthesis:
-  - Cube Tap Pops: Frequency sweep tailored per color state.
-  - Countdown Beeps: Pure 523 Hz (C5) synth beep.
-  - Victory Chime: Ascending two-tone chime (G5 $\rightarrow$ C6).
-- **Countdown MP3 Track**: Triggers `MainActivity.playCountdownAudio()` via JNI to play `R.raw.countdown_party` (`3_2_1_GO_party.mp3`).
+---
 
-### 3.6. Haptic Vibration Engine (`VibrationEngine.h`, `MainActivity.kt`)
-- Invokes `MainActivity.triggerVibration(colorState)` via JNI using `app->activity->javaGameActivity`.
-- **Tactile Patterns**:
-  - White (0): Light click (~15 ms).
-  - Blue (1): Sharp double click (~35 ms).
-  - Red (2): Heavy double pulse (~60 ms).
-  - Green (3 - Future): Triple tick pattern (~25 ms $\times 3$).
-  - Yellow (4 - Future): Ramp pulse (~75 ms).
+### 3.5. Puntos Pendientes / En Revisión
+
+> [!NOTE]
+> - **Flujo de Verificación de PIN para Salas Privadas**: Revisión pendiente para el diálogo emergente de PIN antes de unirse y la visibilidad esporádica de salas privadas en la pantalla `SALAS DISPONIBLES`.
 
 ---
 
 ## 4. Game States & Flow
 
 ```
-[MENU] ──(Tap Play / Reset)──> [COUNTDOWN] ──(4 seconds)──> [PLAYING]
-   ▲                                                           │
-   │                                                    (30s Timeout)
-   │                                                           ▼
-   └───────────────(Tap Reset / Play Again)──────────── [MATCH_OVER]
+[WELCOME / MENU] ──(Buscar / Crear)──> [ROOM_LIST / CREATE_ROOM]
+        │                                       │
+        ▼                                       ▼
+  [ROOM_LOBBY] ◄──────────────(Join)────────────┘
+        │
+   (Owner Starts)
+        ▼
+   [COUNTDOWN] ──(4 seconds)──> [PLAYING (Real-Time 3D Taps)] ──(30s)──> [MATCH_OVER]
 ```
-
-1. **MENU**: Play button displayed over board. Cubes locked.
-2. **COUNTDOWN**: Plays `countdown_party.mp3` while showing `3`, `2`, `1`, `GO!`.
-3. **PLAYING**:
-   - 30-second match timer runs.
-   - Cubes touchable (triggering jump, spin, haptic vibration, procedural sound, and wave particles).
-   - Board rotates when timer $\le 15$s.
-4. **MATCH_OVER**:
-   - Input locked.
-   - Winner Card overlay displays winner and scores.
-   - Tapping "PLAY AGAIN" or Reset resets grid and starts new match.
 
 ---
 
-## 5. Future Extensibility (Green & Yellow States)
+## 5. Instrucciones Mandatorias para Agentes IA (Verificación y Despliegue)
 
-The codebase is pre-configured for expanding cube color states to include Green (3) and Yellow (4):
-- **AudioEngine**: Procedural frequencies defined for `SOUND_TAP_GREEN` (1050 Hz) and `SOUND_TAP_YELLOW` (1250 Hz).
-- **ParticleSystem**: Colors configured for Green (`R: 0.1, G: 0.9, B: 0.2`) and Yellow (`R: 1.0, G: 0.85, B: 0.05`).
-- **VibrationEngine**: Tactile patterns defined for states 3 and 4 in `MainActivity.kt`.
+> [!IMPORTANT]
+> **REGLA OBLIGATORIA PARA TODOS LOS AGENTES DE IA**:
+> 1. Al finalizar cualquier cambio o tarea en este proyecto, DEBES indicar al usuario cómo verificar los cambios realizados.
+> 2. **INSTRUCCIONES DE DESPLIEGUE DEL SERVIDOR**: Las instrucciones de despliegue del VPS ÚNICAMENTE se deben incluir en el resumen final **SI Y SOLO SI se realizaron modificaciones en los archivos del servidor Node.js** (`/Users/lewyz/Downloads/home/admin/game-server/`).
+> 3. Si **NO** se modificaron archivos del servidor (por ejemplo, si solo se cambió código en Android / C++ / Kotlin), **NO DEBES incluir** la Guía de Despliegue del Servidor en tu respuesta final para evitar confusiones.
+
+### Guía de Despliegue del Servidor (Incluir SOLO cuando se modifique el servidor Node.js):
+
+#### 1. En la Terminal de tu Mac (Subir archivos actualizados al VPS)
+```bash
+scp /Users/lewyz/Downloads/home/admin/game-server/{game.js,index.js,test.js,package.json} admin@144.126.151.225:/home/admin/game-server/
+```
+
+#### 2. En el VPS (SSH, ejecutar tests y reiniciar Docker)
+Conéctate por SSH al servidor:
+```bash
+ssh admin@144.126.151.225
+```
+Y ejecuta este bloque completo para correr las pruebas unitarias, copiar los archivos a la carpeta de despliegue y reiniciar el contenedor:
+```bash
+# 1. Ejecutar pruebas unitarias para validar los cambios
+cd /home/admin/game-server && npm test
+
+# 2. Copiar archivos a la carpeta de despliegue
+sudo cp /home/admin/game-server/{game.js,index.js,test.js,package.json} /home/deployer/supabase/docker/game-server/
+
+# 3. Detener ÚNICAMENTE el contenedor game-server (sin apagar los demás servicios)
+sudo docker compose -f /home/deployer/supabase/docker/docker-compose.yml stop game-server
+
+# 4. Reconstruir la imagen e iniciar SOLAMENTE el servicio game-server
+sudo docker compose -f /home/deployer/supabase/docker/docker-compose.yml up -d --build game-server
+```
+
+#### 3. Verificación Inmediata
+Verifica que el servidor esté activo y respondiendo correctamente:
+```bash
+curl https://game.tutaxi502.com/health
+```

@@ -83,7 +83,7 @@ public:
             case StringId::ROOM_NAME_LABEL:
                 return (lang == Language::SPANISH) ? "NOMBRE: " : "NAME: ";
             case StringId::MAX_PLAYERS_NOTE:
-                return (lang == Language::SPANISH) ? "MÁX 8 JUGADORES - 90 SEG" : "MAX 8 PLAYERS - 90 SEC";
+                return (lang == Language::SPANISH) ? "MAX 8 JUGADORES - 90 SEG" : "MAX 8 PLAYERS - 90 SEC";
             case StringId::LOBBY_REQUIRED_PLAYERS:
                 return (lang == Language::SPANISH) ? "REQUERIDOS 2 JUGADORES (1/8)" : "REQUIRED 2 PLAYERS (1/8)";
             case StringId::LOBBY_START_MATCH:

@@ -21,6 +21,15 @@ import java.net.URL
 
 class MainActivity : GameActivity() {
     companion object {
+        @Volatile
+        private var instance: MainActivity? = null
+
+        fun showToast(message: String) {
+            instance?.runOnUiThread {
+                Toast.makeText(instance, message, Toast.LENGTH_LONG).show()
+            }
+        }
+
         init {
             System.loadLibrary("touchparty")
         }
@@ -38,7 +47,13 @@ class MainActivity : GameActivity() {
         external fun nativeOnRoomJoined(roomId: String, isOwner: Boolean): Boolean
 
         @JvmStatic
-        external fun nativeOnRoomStateUpdated(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, state: String): Boolean
+        external fun nativeOnRoomStateUpdated(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, isOwner: Boolean, state: String, playersJson: String): Boolean
+
+        @JvmStatic
+        external fun nativeUpdateBoardCell(x: Int, y: Int, colorState: Int): Boolean
+
+        @JvmStatic
+        external fun nativeStartGameFromNetwork(): Boolean
 
         @JvmStatic
         fun sendServerRoomsToNative(roomsJson: String) {
@@ -69,12 +84,33 @@ class MainActivity : GameActivity() {
         }
 
         @JvmStatic
-        fun sendRoomStateToNative(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, state: String) {
+        fun sendRoomStateToNative(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, isOwner: Boolean, state: String, playersJson: String) {
             Thread {
                 var retries = 0
                 while (retries < 30) {
                     try {
-                        if (nativeOnRoomStateUpdated(roomId, roomName, playerCount, isPrivate, ownerId, state)) break
+                        if (nativeOnRoomStateUpdated(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson)) break
+                    } catch (_: Exception) {}
+                    try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+                    retries++
+                }
+            }.start()
+        }
+
+        @JvmStatic
+        fun sendUpdateBoardCellToNative(x: Int, y: Int, colorState: Int) {
+            try {
+                nativeUpdateBoardCell(x, y, colorState)
+            } catch (_: Exception) {}
+        }
+
+        @JvmStatic
+        fun sendStartGameToNative() {
+            Thread {
+                var retries = 0
+                while (retries < 30) {
+                    try {
+                        if (nativeStartGameFromNetwork()) break
                     } catch (_: Exception) {}
                     try { Thread.sleep(50) } catch (_: InterruptedException) { break }
                     retries++
@@ -91,6 +127,7 @@ class MainActivity : GameActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instance = this
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.attributes.layoutInDisplayCutoutMode =
@@ -110,9 +147,20 @@ class MainActivity : GameActivity() {
         GameWebSocketManager.init()
     }
 
+    fun getAppDeviceId(): String {
+        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
+        var devId = prefs.getString("device_id", null)
+        if (devId.isNullOrEmpty()) {
+            devId = "dev-" + java.util.UUID.randomUUID().toString().take(8)
+            prefs.edit().putString("device_id", devId).apply()
+        }
+        return devId
+    }
+
     fun requestCreateRoom(roomName: String, isPrivate: Boolean, pin: String) {
         val nick = getSavedNickname()
-        GameWebSocketManager.createRoom(roomName, isPrivate, pin, nick)
+        val devId = getAppDeviceId()
+        GameWebSocketManager.createRoom(roomName, isPrivate, pin, nick, devId)
     }
 
     fun requestListRooms() {
@@ -121,11 +169,21 @@ class MainActivity : GameActivity() {
 
     fun requestJoinRoom(roomId: String, pin: String) {
         val nick = getSavedNickname()
-        GameWebSocketManager.joinRoom(roomId, pin, nick)
+        val devId = getAppDeviceId()
+        GameWebSocketManager.joinRoom(roomId, pin, nick, devId)
     }
 
     fun requestLeaveRoom() {
         GameWebSocketManager.leaveRoom()
+        GameWebSocketManager.listRooms()
+    }
+
+    fun requestStartGame() {
+        GameWebSocketManager.sendStartGame()
+    }
+
+    fun requestSendTap(x: Int, y: Int) {
+        GameWebSocketManager.sendTap(x, y)
     }
 
     private fun checkAndPromptInitialNickname() {
@@ -176,7 +234,7 @@ class MainActivity : GameActivity() {
 
             val input = EditText(this)
             input.setText(currentText)
-            if (fieldType == 2) {
+            if (fieldType == 2 || fieldType == 3) {
                 input.inputType = InputType.TYPE_CLASS_NUMBER
             } else {
                 input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
@@ -292,6 +350,9 @@ class MainActivity : GameActivity() {
     }
 
     override fun onDestroy() {
+        if (instance == this) instance = null
+        GameWebSocketManager.leaveRoom()
+        GameWebSocketManager.disconnect()
         isCheckingHealth = false
         healthCheckThread?.interrupt()
         healthCheckThread = null

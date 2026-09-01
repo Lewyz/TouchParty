@@ -19,12 +19,13 @@ struct CubeData {
     int col;
     Vec3 basePos;
     CubeState state;
+    bool isObstacle;
     float jumpTime; // 0.0 to 1.0
     float yOffset;
     float rotAngle;
 
     CubeData()
-        : row(0), col(0), basePos(0, 0, 0), state(CUBE_STATE_WHITE),
+        : row(0), col(0), basePos(0, 0, 0), state(CUBE_STATE_WHITE), isObstacle(false),
           jumpTime(0.0f), yOffset(0.0f), rotAngle(0.0f) {}
 };
 
@@ -50,6 +51,28 @@ public:
             cube.jumpTime = 0.0f;
             cube.yOffset = 0.0f;
             cube.rotAngle = 0.0f;
+        }
+    }
+
+    void recalculateCounts() {
+        blueCount_ = 0;
+        redCount_ = 0;
+        for (const auto& cube : cubes_) {
+            if (cube.state == CUBE_STATE_BLUE) blueCount_++;
+            else if (cube.state == CUBE_STATE_RED) redCount_++;
+        }
+    }
+
+    void setCubeState(int col, int row, CubeState newState) {
+        if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+        int index = row * COLS + col;
+        if (index >= 0 && index < static_cast<int>(cubes_.size())) {
+            auto& cube = cubes_[index];
+            if (cube.state != newState) {
+                cube.state = newState;
+                cube.jumpTime = 0.001f;
+                recalculateCounts();
+            }
         }
     }
 
@@ -95,6 +118,8 @@ public:
 
         for (int i = 0; i < static_cast<int>(cubes_.size()); ++i) {
             const auto& cube = cubes_[i];
+            if (cube.isObstacle) continue;
+
             Vec3 pos = cube.basePos;
             pos.y += cube.yOffset;
 
@@ -112,21 +137,15 @@ public:
         return bestIndex;
     }
 
-    bool tapCube(int index, Vec3& outPos, CubeState& outState) {
+    bool tapCube(int index, Vec3& outPos, CubeState& outState, bool isPlayerOne = true) {
         if (index < 0 || index >= static_cast<int>(cubes_.size())) return false;
 
         auto& cube = cubes_[index];
-        if (cube.state == CUBE_STATE_WHITE) {
-            cube.state = CUBE_STATE_BLUE;
-            blueCount_++;
-        } else if (cube.state == CUBE_STATE_BLUE) {
-            cube.state = CUBE_STATE_RED;
-            blueCount_--;
-            redCount_++;
-        } else if (cube.state == CUBE_STATE_RED) {
-            cube.state = CUBE_STATE_WHITE;
-            redCount_--;
-        }
+        if (cube.isObstacle) return false;
+
+        CubeState targetState = isPlayerOne ? CUBE_STATE_BLUE : CUBE_STATE_RED;
+        cube.state = targetState;
+        recalculateCounts();
 
         cube.jumpTime = 0.001f;
 
@@ -166,7 +185,9 @@ public:
             shader.setProjectionMatrix(mvp);
 
             float r = 0.95f, g = 0.96f, b = 0.98f;
-            if (cube.state == CUBE_STATE_BLUE) {
+            if (cube.isObstacle) {
+                r = 0.22f; g = 0.24f; b = 0.28f;
+            } else if (cube.state == CUBE_STATE_BLUE) {
                 r = 0.05f; g = 0.55f; b = 1.0f;
             } else if (cube.state == CUBE_STATE_RED) {
                 r = 1.0f; g = 0.22f; b = 0.22f;
@@ -232,6 +253,9 @@ private:
                 cube.col = c;
                 cube.basePos = Vec3(startX + c * GRID_SPACING, 0.0f, startZ + r * GRID_SPACING);
                 cube.state = CUBE_STATE_WHITE;
+                cube.isObstacle = (c == 3 && r == 3) || (c == 8 && r == 3) ||
+                                  (c == 3 && r == 6) || (c == 8 && r == 6) ||
+                                  (c == 5 && r == 4) || (c == 6 && r == 5);
                 cubes_.push_back(cube);
             }
         }

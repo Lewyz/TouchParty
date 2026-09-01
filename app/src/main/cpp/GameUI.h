@@ -63,6 +63,12 @@ struct ServerRoomEntry {
     std::string pin;
 };
 
+struct PlayerInfo {
+    std::string id;
+    std::string name;
+    bool isOwner = false;
+};
+
 class GameUI {
 public:
     GameUI()
@@ -77,9 +83,12 @@ public:
           userNickname_(""),
           isServerConnected_(false),
           connectedPlayerCount_(1),
+          isOwner_(false),
           filterTypeIndex_(0),
           roomListScrollOffset_(0),
-          joinNotificationTimer_(0.0f) {
+          joinNotificationTimer_(0.0f),
+          showLeaveConfirmModal_(false),
+          pendingJoinRoom_(false) {
         initQuadGeometry();
         initMiniCubeGeometry();
         // Server rooms are populated ONLY from real server responses (0 fake rooms!)
@@ -93,6 +102,7 @@ public:
     void setMatchTimer(float t) { matchTimer_ = t; }
 
     bool isPrivateRoom() const { return isPrivateRoom_; }
+    bool isOwner() const { return isOwner_; }
     const std::string& getRoomPin() const { return roomPin_; }
     const std::string& getRoomName() const { return roomName_; }
     const std::string& getSelectedRoomId() const { return selectedRoomId_; }
@@ -134,7 +144,18 @@ public:
             roomName_ = text;
         } else if (fieldType == 2) {
             roomPin_ = text;
+        } else if (fieldType == 3) {
+            roomPin_ = text;
+            pendingJoinRoom_ = true;
         }
+    }
+
+    bool checkAndClearPendingJoinRoom() {
+        if (pendingJoinRoom_) {
+            pendingJoinRoom_ = false;
+            return true;
+        }
+        return false;
     }
 
     void setServerRooms(const std::vector<ServerRoomEntry>& rooms) {
@@ -152,6 +173,67 @@ public:
 
             ServerRoomEntry entry;
             auto getVal = [&](const std::string& key) -> std::string {
+                std::string pattern = "\"" + key + "\":";
+                size_t k = objStr.find(pattern);
+                if (k == std::string::npos) return "";
+                size_t valStart = k + pattern.length();
+                while (valStart < objStr.length() && (objStr[valStart] == ' ' || objStr[valStart] == '"')) {
+                    valStart++;
+                }
+                size_t valEnd = objStr.find_first_of("\",}", valStart);
+                if (valEnd == std::string::npos) valEnd = objStr.length();
+                return objStr.substr(valStart, valEnd - valStart);
+            };
+
+            entry.id = getVal("id");
+            entry.name = getVal("name");
+            std::string priv = getVal("isPrivate");
+            entry.isPrivate = (priv.find("true") != std::string::npos || priv == "1");
+            std::string pc = getVal("playerCount");
+            if (!pc.empty()) entry.playerCount = std::atoi(pc.c_str());
+            std::string mp = getVal("maxPlayers");
+            if (!mp.empty()) entry.maxPlayers = std::atoi(mp.c_str());
+            entry.pin = getVal("pin");
+
+            if (!entry.id.empty()) {
+                bool exists = false;
+                for (const auto& existing : serverRooms_) {
+                    if (existing.id == entry.id) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    serverRooms_.push_back(entry);
+                }
+            }
+            pos = endPos + 1;
+        }
+        roomListScrollOffset_ = 0;
+    }
+
+    void onRoomJoined(const std::string& roomId, bool isOwner) {
+        state_ = GameState::ROOM_LOBBY;
+        isOwner_ = isOwner;
+        if (isOwner) {
+            connectedPlayerCount_ = 1;
+        }
+    }
+
+    void onRoomStateUpdated(const std::string& name, int playerCount, bool isPrivate, const std::string& ownerId, bool isOwner, const std::string& playersJson) {
+        if (!name.empty()) roomName_ = name;
+        isPrivateRoom_ = isPrivate;
+        ownerId_ = ownerId;
+
+        // Parse players JSON array from server: [{"id":"...","name":"..."},...]
+        currentRoomPlayers_.clear();
+        size_t pos = 0;
+        while ((pos = playersJson.find('{', pos)) != std::string::npos) {
+            size_t endPos = playersJson.find('}', pos);
+            if (endPos == std::string::npos) break;
+            std::string objStr = playersJson.substr(pos, endPos - pos + 1);
+
+            auto getVal = [&](const std::string& key) -> std::string {
                 size_t k = objStr.find("\"" + key + "\":");
                 if (k == std::string::npos) return "";
                 size_t valStart = objStr.find_first_not_of(" :\"", k + key.length() + 3);
@@ -161,35 +243,36 @@ public:
                 return objStr.substr(valStart, valEnd - valStart);
             };
 
-            entry.id = getVal("id");
-            entry.name = getVal("name");
-            std::string priv = getVal("isPrivate");
-            entry.isPrivate = (priv == "true");
-            std::string pc = getVal("playerCount");
-            if (!pc.empty()) entry.playerCount = std::atoi(pc.c_str());
-            std::string mp = getVal("maxPlayers");
-            if (!mp.empty()) entry.maxPlayers = std::atoi(mp.c_str());
-            entry.pin = getVal("pin");
-
-            if (!entry.name.empty() || !entry.id.empty()) {
-                serverRooms_.push_back(entry);
+            PlayerInfo p;
+            p.id = getVal("id");
+            p.name = getVal("name");
+            p.isOwner = (!p.id.empty() && p.id == ownerId_);
+            if (!p.name.empty()) {
+                currentRoomPlayers_.push_back(p);
             }
             pos = endPos + 1;
         }
-        roomListScrollOffset_ = 0;
-    }
 
-    void onRoomJoined(const std::string& roomId, bool isOwner) {
-        state_ = GameState::ROOM_LOBBY;
-        if (isOwner) {
-            connectedPlayerCount_ = 1;
+        int actualCount = currentRoomPlayers_.empty() ? playerCount : static_cast<int>(currentRoomPlayers_.size());
+
+        // Trigger real-time visual banners for member leave / join / ownership transfer
+        if (connectedPlayerCount_ > 0) {
+            if (actualCount < connectedPlayerCount_) {
+                joinNotificationText_ = "¡UN JUGADOR HA SALIDO DE LA SALA!";
+                joinNotificationTimer_ = 3.5f;
+            } else if (actualCount > connectedPlayerCount_) {
+                joinNotificationText_ = "¡UN JUGADOR SE HA UNIDO A LA SALA!";
+                joinNotificationTimer_ = 3.5f;
+            }
         }
-    }
 
-    void onRoomStateUpdated(const std::string& name, int playerCount, bool isPrivate) {
-        if (!name.empty()) roomName_ = name;
-        connectedPlayerCount_ = playerCount;
-        isPrivateRoom_ = isPrivate;
+        if (!isOwner_ && isOwner) {
+            joinNotificationText_ = "¡AHORA ERES EL CREADOR DE LA SALA!";
+            joinNotificationTimer_ = 4.0f;
+        }
+
+        connectedPlayerCount_ = actualCount;
+        isOwner_ = isOwner;
     }
 
     void startCountdown(AudioEngine* audioEngine = nullptr) {
@@ -240,6 +323,27 @@ public:
         float aspect = width / height;
         float normX = ((2.0f * screenX) / width - 1.0f) * aspect;
         float normY = 1.0f - (2.0f * screenY) / height;
+
+        // 0. Modal Confirmation Touch handling
+        if (showLeaveConfirmModal_) {
+            float yesX = -0.28f, yesY = -0.12f, btnW = 0.42f, btnH = 0.15f;
+            float noX = 0.28f, noY = -0.12f;
+
+            if (std::abs(normX - yesX) <= btnW * 0.5f + 0.04f &&
+                std::abs(normY - yesY) <= btnH * 0.5f + 0.04f) {
+                showLeaveConfirmModal_ = false;
+                state_ = GameState::WELCOME;
+                if (audioEngine) audioEngine->playCountdownBeep();
+                return TouchAction::LEAVE_ROOM_LOBBY;
+            }
+            if (std::abs(normX - noX) <= btnW * 0.5f + 0.04f &&
+                std::abs(normY - noY) <= btnH * 0.5f + 0.04f) {
+                showLeaveConfirmModal_ = false;
+                if (audioEngine) audioEngine->playCountdownBeep();
+                return TouchAction::NONE;
+            }
+            return TouchAction::NONE;
+        }
 
         // 1. Reset / Exit Match check
         if (state_ == GameState::COUNTDOWN || state_ == GameState::PLAYING || state_ == GameState::MATCH_OVER) {
@@ -320,8 +424,6 @@ public:
             float createX = 0.0f, createY = -0.35f, createW = 0.85f, createH = 0.15f;
             if (std::abs(normX - createX) <= createW * 0.5f + 0.04f &&
                 std::abs(normY - createY) <= createH * 0.5f + 0.04f) {
-                state_ = GameState::ROOM_LOBBY;
-                connectedPlayerCount_ = 1; // Starts with 1 player (Owner)
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::CONFIRM_CREATE_ROOM;
             }
@@ -337,38 +439,26 @@ public:
         }
         // 4. ROOM LOBBY Screen Touch (Waiting Room before start)
         else if (state_ == GameState::ROOM_LOBBY) {
-            // Add Player Simulation Button (+1 Player)
-            float simX = 0.0f, simY = -0.06f, simW = 0.85f, simH = 0.12f;
-            if (std::abs(normX - simX) <= simW * 0.5f + 0.04f &&
-                std::abs(normY - simY) <= simH * 0.5f + 0.04f) {
-                connectedPlayerCount_++;
-                if (connectedPlayerCount_ > 8) connectedPlayerCount_ = 1;
-                triggerJoinNotification("JUGADOR " + std::to_string(connectedPlayerCount_));
-                if (audioEngine) audioEngine->playCountdownBeep();
-                return TouchAction::SIMULATE_ADD_PLAYER;
-            }
-
             // START GAME Button (Requires at least 2 players!)
-            float startX = 0.0f, startY = -0.26f, startW = 0.85f, startH = 0.16f;
+            float startX = -0.65f, startY = -0.22f, startW = 1.15f, startH = 0.24f;
             if (std::abs(normX - startX) <= startW * 0.5f + 0.04f &&
                 std::abs(normY - startY) <= startH * 0.5f + 0.04f) {
-                if (connectedPlayerCount_ >= 2) {
-                    startCountdown(audioEngine);
+                if (isOwner_ && connectedPlayerCount_ >= 2) {
+                    if (audioEngine) audioEngine->playCountdownBeep();
                     return TouchAction::START_MULTIPLAYER_GAME;
                 } else {
-                    // Less than 2 players -> blocked!
                     if (audioEngine) audioEngine->playCountdownBeep();
                     return TouchAction::NONE;
                 }
             }
 
-            // SALIR DE SALA Button
+            // SALIR DE SALA Button (Opens confirm modal)
             float backX = -aspect + 0.28f, backY = -0.82f, backW = 0.38f, backH = 0.12f;
             if (std::abs(normX - backX) <= backW * 0.5f + 0.04f &&
                 std::abs(normY - backY) <= backH * 0.5f + 0.04f) {
-                state_ = GameState::WELCOME;
+                showLeaveConfirmModal_ = true;
                 if (audioEngine) audioEngine->playCountdownBeep();
-                return TouchAction::LEAVE_ROOM_LOBBY;
+                return TouchAction::NONE;
             }
         }
         // 5. ROOM LIST Screen Touch (Scrollable & Filterable)
@@ -413,12 +503,16 @@ public:
                     selectedRoomId_ = room.id;
                     roomName_ = room.name;
                     isPrivateRoom_ = room.isPrivate;
-                    roomPin_ = room.pin;
-                    connectedPlayerCount_ = room.playerCount + 1;
-                    state_ = GameState::ROOM_LOBBY;
-                    triggerJoinNotification(userNickname_);
-                    if (audioEngine) audioEngine->playCountdownBeep();
-                    return TouchAction::JOIN_SELECTED_ROOM;
+
+                    if (room.isPrivate) {
+                        triggerNativeTextInput(app, 3, "PIN DE SALA PRIVADA (" + room.name + "):", "");
+                        if (audioEngine) audioEngine->playCountdownBeep();
+                        return TouchAction::EDIT_PIN;
+                    } else {
+                        roomPin_ = "";
+                        if (audioEngine) audioEngine->playCountdownBeep();
+                        return TouchAction::JOIN_SELECTED_ROOM;
+                    }
                 }
             }
 
@@ -493,6 +587,11 @@ public:
             renderCountdown(shader, ortho);
         } else if (state_ == GameState::MATCH_OVER) {
             renderWinnerOverlay(shader, ortho, redCount, blueCount);
+        }
+
+        // 3. Render Modal Confirm Overlay if active
+        if (showLeaveConfirmModal_) {
+            renderLeaveConfirmModal(shader, ortho, aspect);
         }
     }
 
@@ -650,42 +749,77 @@ private:
 
     void renderRoomLobbyScreen(const Shader& shader, const float* ortho, float aspect) const {
         float cx = 0.0f, cy = -0.03f;
-        float cardW = 1.40f, cardH = 0.85f;
+        float cardW = 2.65f, cardH = 1.25f;
 
-        // Container card
+        // Container card (Expanded +50% across screen)
         drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.08f, 0.11f, 0.18f, 0.94f);
-        drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
-        drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
+        drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.015f, 0.10f, 0.70f, 1.0f, 0.95f);
+        drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.015f, 0.10f, 0.70f, 1.0f, 0.95f);
 
-        // Room Name Title & Privacy
-        drawTextString(shader, ortho, cx, cy + 0.31f, roomName_, 0.132f, 1.0f, 0.85f, 0.10f);
-        std::string privStr = isPrivateRoom_ ? ("SALA PRIVADA (PIN: " + roomPin_ + ")") : ("SALA PÚBLICA");
-        drawTextString(shader, ortho, cx, cy + 0.22f, privStr, 0.087f, 0.60f, 0.80f, 1.0f);
+        // Room Name Title & Privacy Header (No accents!)
+        drawTextString(shader, ortho, cx, cy + 0.44f, roomName_, 0.175f, 1.0f, 0.85f, 0.10f);
+        std::string privStr = isPrivateRoom_ ? ("PRIVADA (PIN: " + roomPin_ + ")") : ("PUBLICA");
+        drawTextString(shader, ortho, cx, cy + 0.30f, privStr, 0.115f, 0.60f, 0.80f, 1.0f);
+
+        // --- LEFT SIDE COLUMN (STATUS & START BUTTON) ---
+        float leftX = -0.65f;
+        float lBoxW = 1.15f;
 
         // Connected Players Banner (Count display: e.g. 1/8 or 3/8)
-        float pBoxX = 0.0f, pBoxY = 0.10f, pBoxW = 1.15f, pBoxH = 0.11f;
-        drawQuad(shader, ortho, pBoxX, pBoxY, pBoxW, pBoxH, 0.12f, 0.16f, 0.24f, 0.92f);
-        std::string countStr = Strings::get(StringId::LOBBY_REQUIRED_PLAYERS);
-        drawTextString(shader, ortho, pBoxX, pBoxY, "JUGADORES EN SALA: " + std::to_string(connectedPlayerCount_) + "/8", 0.102f, 0.20f, 0.90f, 1.0f);
+        float pBoxY = 0.08f, pBoxH = 0.16f;
+        drawQuad(shader, ortho, leftX, pBoxY, lBoxW, pBoxH, 0.12f, 0.16f, 0.24f, 0.92f);
+        drawTextString(shader, ortho, leftX, pBoxY, "JUGADORES: " + std::to_string(connectedPlayerCount_) + "/8", 0.130f, 0.20f, 0.90f, 1.0f);
 
-        // Simulation Button (+1 Player)
-        float simX = 0.0f, simY = -0.06f, simW = 0.85f, simH = 0.12f;
-        drawQuad(shader, ortho, simX, simY, simW, simH, 0.14f, 0.22f, 0.35f, 0.92f);
-        drawTextString(shader, ortho, simX, simY, Strings::get(StringId::LOBBY_ADD_TEST_PLAYER), 0.093f, 0.85f, 0.95f, 1.0f);
-
-        // START GAME Button Rule
-        float startX = 0.0f, startY = -0.26f, startW = 0.85f, startH = 0.16f;
-        if (connectedPlayerCount_ < 2) {
-            // Disabled state (Red/Dark)
-            drawQuad(shader, ortho, startX, startY, startW, startH, 0.30f, 0.12f, 0.14f, 0.92f);
-            drawQuad(shader, ortho, startX, startY - startH * 0.5f, startW, 0.01f, 0.70f, 0.20f, 0.20f, 0.95f);
-            drawTextString(shader, ortho, startX, startY, Strings::get(StringId::LOBBY_REQUIRED_PLAYERS), 0.098f, 0.95f, 0.40f, 0.40f);
+        // START GAME Button Rule (Owner vs Non-Owner)
+        float startY = -0.22f, startH = 0.24f;
+        if (isOwner_) {
+            if (connectedPlayerCount_ < 2) {
+                // Disabled state (Red/Dark)
+                drawQuad(shader, ortho, leftX, startY, lBoxW, startH, 0.30f, 0.12f, 0.14f, 0.92f);
+                drawQuad(shader, ortho, leftX, startY - startH * 0.5f, lBoxW, 0.012f, 0.70f, 0.20f, 0.20f, 0.95f);
+                drawTextString(shader, ortho, leftX, startY, Strings::get(StringId::LOBBY_REQUIRED_PLAYERS), 0.115f, 0.95f, 0.40f, 0.40f);
+            } else {
+                // Enabled state (Green/Cyan)
+                drawQuad(shader, ortho, leftX, startY, lBoxW, startH, 0.15f, 0.75f, 0.35f, 0.95f);
+                drawQuad(shader, ortho, leftX, startY - startH * 0.5f, lBoxW, 0.012f, 0.50f, 0.95f, 0.60f, 0.95f);
+                std::string startLabel = Strings::get(StringId::LOBBY_START_MATCH) + " (" + std::to_string(connectedPlayerCount_) + "/8)";
+                drawTextString(shader, ortho, leftX, startY, startLabel, 0.135f, 1.0f, 1.0f, 1.0f);
+            }
         } else {
-            // Enabled state (Green/Cyan)
-            drawQuad(shader, ortho, startX, startY, startW, startH, 0.15f, 0.75f, 0.35f, 0.95f);
-            drawQuad(shader, ortho, startX, startY - startH * 0.5f, startW, 0.01f, 0.50f, 0.95f, 0.60f, 0.95f);
-            std::string startLabel = Strings::get(StringId::LOBBY_START_MATCH) + " (" + std::to_string(connectedPlayerCount_) + "/8)";
-            drawTextString(shader, ortho, startX, startY, startLabel, 0.117f, 1.0f, 1.0f, 1.0f);
+            // Non-owner waiting indicator box
+            drawQuad(shader, ortho, leftX, startY, lBoxW, startH, 0.12f, 0.18f, 0.28f, 0.92f);
+            drawQuad(shader, ortho, leftX, startY - startH * 0.5f, lBoxW, 0.012f, 0.20f, 0.70f, 0.95f, 0.95f);
+            drawTextString(shader, ortho, leftX, startY, "ESPERANDO AL CREADOR...", 0.115f, 0.90f, 0.95f, 1.0f);
+        }
+
+        // --- RIGHT SIDE COLUMN (REAL-TIME PLAYERS LIST) ---
+        float rightX = 0.65f;
+        float rTitleY = 0.22f, rBoxW = 1.15f;
+
+        // Title box
+        drawQuad(shader, ortho, rightX, rTitleY, rBoxW, 0.11f, 0.10f, 0.14f, 0.22f, 0.95f);
+        drawTextString(shader, ortho, rightX, rTitleY, "INTEGRANTES DE LA SALA", 0.115f, 0.20f, 0.90f, 1.0f);
+
+        // Render player rows cleanly (No "?" and No "JUGADOR:")
+        float startRowY = 0.08f;
+        size_t maxPlayers = std::min(currentRoomPlayers_.size(), static_cast<size_t>(5));
+        for (size_t i = 0; i < maxPlayers; ++i) {
+            const auto& p = currentRoomPlayers_[i];
+            float rowY = startRowY - static_cast<float>(i) * 0.14f;
+            float rowH = 0.12f;
+
+            if (p.isOwner) {
+                // Highlight Room Owner / Creator with Gold Accent & [CREADOR] tag
+                drawQuad(shader, ortho, rightX, rowY, rBoxW, rowH, 0.38f, 0.28f, 0.05f, 0.92f);
+                drawQuad(shader, ortho, rightX - rBoxW * 0.5f + 0.008f, rowY, 0.016f, rowH, 1.0f, 0.85f, 0.10f, 1.0f);
+                std::string label = "[CREADOR] " + p.name;
+                drawTextString(shader, ortho, rightX, rowY, label, 0.115f, 1.0f, 0.90f, 0.20f);
+            } else {
+                // Regular Connected Player Name
+                drawQuad(shader, ortho, rightX, rowY, rBoxW, rowH, 0.12f, 0.18f, 0.28f, 0.92f);
+                drawQuad(shader, ortho, rightX - rBoxW * 0.5f + 0.008f, rowY, 0.016f, rowH, 0.20f, 0.70f, 1.0f, 1.0f);
+                drawTextString(shader, ortho, rightX, rowY, p.name, 0.115f, 0.80f, 0.90f, 1.0f);
+            }
         }
 
         // SALIR DE SALA Button (Bottom Left)
@@ -694,15 +828,15 @@ private:
 
     void renderRoomListScreen(const Shader& shader, const float* ortho, float aspect) const {
         float cx = 0.0f, cy = -0.03f;
-        float cardW = 1.45f, cardH = 0.85f;
+        float cardW = 2.20f, cardH = 1.20f;
 
-        // Container card
+        // Container card (Expanded landscape layout)
         drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.08f, 0.11f, 0.18f, 0.94f);
         drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
         drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
 
         // Title
-        drawTextString(shader, ortho, cx, cy + 0.31f, Strings::get(StringId::AVAILABLE_ROOMS_TITLE), 0.135f, 0.20f, 0.90f, 1.0f);
+        drawTextString(shader, ortho, cx, cy + 0.42f, Strings::get(StringId::AVAILABLE_ROOMS_TITLE), 0.160f, 0.20f, 0.90f, 1.0f);
 
         // Search / Filter Selector Box
         std::vector<std::string> filterNames = {
@@ -710,51 +844,51 @@ private:
             "BUSCAR: " + Strings::get(StringId::FILTER_PUBLIC),
             "BUSCAR: " + Strings::get(StringId::FILTER_PRIVATE)
         };
-        float filterX = -0.15f, filterY = 0.20f, filterW = 0.70f, filterH = 0.10f;
+        float filterX = -0.30f, filterY = 0.26f, filterW = 0.90f, filterH = 0.12f;
         drawQuad(shader, ortho, filterX, filterY, filterW, filterH, 0.12f, 0.16f, 0.24f, 0.92f);
-        drawTextString(shader, ortho, filterX, filterY, filterNames[filterTypeIndex_], 0.093f, 0.80f, 0.90f, 1.0f);
+        drawTextString(shader, ortho, filterX, filterY, filterNames[filterTypeIndex_], 0.108f, 0.80f, 0.90f, 1.0f);
 
         // Scroll Up ▲ & Scroll Down ▼ Control Buttons
-        float scrollX = 0.52f, scrollW = 0.22f, scrollH = 0.10f;
-        float upY = 0.20f, downY = -0.22f;
+        float scrollX = 0.65f, scrollW = 0.35f, scrollH = 0.12f;
+        float upY = 0.26f, downY = -0.26f;
         drawQuad(shader, ortho, scrollX, upY, scrollW, scrollH, 0.14f, 0.22f, 0.35f, 0.92f);
-        drawTextString(shader, ortho, scrollX, upY, Strings::get(StringId::SCROLL_UP), 0.093f, 1.0f, 1.0f, 1.0f);
+        drawTextString(shader, ortho, scrollX, upY, Strings::get(StringId::SCROLL_UP), 0.108f, 1.0f, 1.0f, 1.0f);
 
         drawQuad(shader, ortho, scrollX, downY, scrollW, scrollH, 0.14f, 0.22f, 0.35f, 0.92f);
-        drawTextString(shader, ortho, scrollX, downY, Strings::get(StringId::SCROLL_DOWN), 0.093f, 1.0f, 1.0f, 1.0f);
+        drawTextString(shader, ortho, scrollX, downY, Strings::get(StringId::SCROLL_DOWN), 0.108f, 1.0f, 1.0f, 1.0f);
 
         // Filter Rooms
         auto filtered = getFilteredRooms();
 
         if (filtered.empty()) {
             float emptyY = -0.04f;
-            drawQuad(shader, ortho, 0.0f, emptyY, 1.15f, 0.24f, 0.12f, 0.15f, 0.22f, 0.92f);
-            drawTextString(shader, ortho, 0.0f, emptyY + 0.04f, Strings::get(StringId::EMPTY_ROOMS_LINE1), 0.087f, 1.0f, 0.45f, 0.35f);
-            drawTextString(shader, ortho, 0.0f, emptyY - 0.04f, Strings::get(StringId::EMPTY_ROOMS_LINE2), 0.081f, 0.60f, 0.80f, 1.0f);
+            drawQuad(shader, ortho, 0.0f, emptyY, 1.50f, 0.28f, 0.12f, 0.15f, 0.22f, 0.92f);
+            drawTextString(shader, ortho, 0.0f, emptyY + 0.05f, Strings::get(StringId::EMPTY_ROOMS_LINE1), 0.105f, 1.0f, 0.45f, 0.35f);
+            drawTextString(shader, ortho, 0.0f, emptyY - 0.05f, Strings::get(StringId::EMPTY_ROOMS_LINE2), 0.098f, 0.60f, 0.80f, 1.0f);
         } else {
             // Render visible real room rows with scroll offset
-            float startY = 0.06f;
+            float startY = 0.08f;
             size_t maxVisible = 3;
             size_t startIndex = std::min(static_cast<size_t>(roomListScrollOffset_), filtered.size() - 1);
 
             for (size_t i = 0; i < maxVisible && (startIndex + i) < filtered.size(); ++i) {
                 const auto& room = filtered[startIndex + i];
-                float rowY = startY - static_cast<float>(i) * 0.14f;
+                float rowY = startY - static_cast<float>(i) * 0.17f;
 
-                // Room info box
-                drawQuad(shader, ortho, -0.15f, rowY, 0.80f, 0.12f, 0.13f, 0.17f, 0.25f, 0.92f);
-                std::string typeTag = room.isPrivate ? Strings::get(StringId::FILTER_PRIVATE) : Strings::get(StringId::FILTER_PUBLIC);
-                std::string label = room.name + " " + typeTag + " " + std::to_string(room.playerCount) + "/" + std::to_string(room.maxPlayers);
+                // Room info box (Clean name without "PUBLICAS"/"PRIVADAS" appended!)
+                drawQuad(shader, ortho, -0.20f, rowY, 1.25f, 0.14f, 0.13f, 0.17f, 0.25f, 0.92f);
+                std::string label = room.name + " (" + std::to_string(room.playerCount) + "/" + std::to_string(room.maxPlayers) + ")";
 
-                float r = room.isPrivate ? 0.95f : 0.90f;
-                float g = room.isPrivate ? 0.60f : 0.90f;
-                float b = room.isPrivate ? 0.20f : 0.90f;
-                drawTextString(shader, ortho, -0.15f, rowY, label, 0.087f, r, g, b);
+                // Private rooms: Bright Orange text. Public rooms: Bright Cyan text.
+                float r = room.isPrivate ? 1.00f : 0.20f;
+                float g = room.isPrivate ? 0.55f : 0.90f;
+                float b = room.isPrivate ? 0.10f : 1.00f;
+                drawTextString(shader, ortho, -0.20f, rowY, label, 0.108f, r, g, b);
 
-                // Join button
-                drawQuad(shader, ortho, 0.42f, rowY, 0.32f, 0.12f, 0.15f, 0.75f, 0.35f, 0.95f);
-                std::string btnText = room.isPrivate ? ("PIN " + room.pin) : Strings::get(StringId::JOIN_ROOM);
-                drawTextString(shader, ortho, 0.42f, rowY, btnText, 0.098f, 1.0f, 1.0f, 1.0f);
+                // Join button (PIN for private, UNIRSE for public)
+                drawQuad(shader, ortho, 0.65f, rowY, 0.35f, 0.14f, 0.15f, 0.75f, 0.35f, 0.95f);
+                std::string btnText = room.isPrivate ? "PIN" : Strings::get(StringId::JOIN_ROOM);
+                drawTextString(shader, ortho, 0.65f, rowY, btnText, 0.115f, 1.0f, 1.0f, 1.0f);
             }
         }
 
@@ -807,40 +941,96 @@ private:
 
     void renderWinnerOverlay(const Shader& shader, const float* ortho, int redCount, int blueCount) const {
         float cx = 0.0f;
-        float cy = 0.05f;
-        float cardW = 1.20f;
-        float cardH = 0.75f;
+        float cy = 0.03f;
+        float cardW = 1.35f;
+        float cardH = 0.82f;
 
         // Backdrop card
         drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.09f, 0.12f, 0.17f, 0.95f);
         drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.012f, 0.4f, 0.7f, 1.0f, 0.95f);
         drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.012f, 0.4f, 0.7f, 1.0f, 0.95f);
 
-        // Winner Text
-        float textY = cy + 0.20f;
-        if (redCount > blueCount) {
-            drawTextString(shader, ortho, cx, textY, Strings::get(StringId::RED_WINS), 0.150f, 1.0f, 0.25f, 0.25f);
-        } else if (blueCount > redCount) {
-            drawTextString(shader, ortho, cx, textY, Strings::get(StringId::BLUE_WINS), 0.150f, 0.1f, 0.65f, 1.0f);
+        // 1. Victory / Defeat Status Banner for THIS User
+        float statusY = cy + 0.28f;
+        bool isMyTeamBlue = isOwner_; // Creator is Blue, Joiner is Red
+        bool isBlueWinner = blueCount > redCount;
+        bool isRedWinner = redCount > blueCount;
+        bool isTie = (redCount == blueCount);
+
+        if (isTie) {
+            std::string tieStr = (Strings::getLanguage() == Language::SPANISH) ? "¡EMPATE!" : "TIE GAME!";
+            drawTextString(shader, ortho, cx, statusY, tieStr, 0.145f, 1.0f, 0.90f, 0.20f);
         } else {
-            drawTextString(shader, ortho, cx, textY, Strings::get(StringId::DRAW), 0.155f, 1.0f, 0.9f, 0.2f);
+            bool iWon = (isMyTeamBlue && isBlueWinner) || (!isMyTeamBlue && isRedWinner);
+            if (iWon) {
+                std::string winStr = (Strings::getLanguage() == Language::SPANISH) ? "¡HAS GANADO!" : "YOU WON!";
+                drawTextString(shader, ortho, cx, statusY, winStr, 0.155f, 0.20f, 1.0f, 0.40f);
+            } else {
+                std::string loseStr = (Strings::getLanguage() == Language::SPANISH) ? "HAS PERDIDO" : "YOU LOST";
+                drawTextString(shader, ortho, cx, statusY, loseStr, 0.155f, 1.0f, 0.30f, 0.30f);
+            }
         }
 
-        // Final Score Summary Text: RED: X | BLUE: Y
-        float scoreY = cy + 0.02f;
+        // 2. Winner Team Text
+        float textY = cy + 0.12f;
+        if (redCount > blueCount) {
+            drawTextString(shader, ortho, cx, textY, Strings::get(StringId::RED_WINS), 0.120f, 1.0f, 0.25f, 0.25f);
+        } else if (blueCount > redCount) {
+            drawTextString(shader, ortho, cx, textY, Strings::get(StringId::BLUE_WINS), 0.120f, 0.1f, 0.65f, 1.0f);
+        } else {
+            drawTextString(shader, ortho, cx, textY, Strings::get(StringId::DRAW), 0.120f, 1.0f, 0.9f, 0.2f);
+        }
+
+        // 3. Final Score Summary Text: RED: X | BLUE: Y
+        float scoreY = cy - 0.05f;
         drawDigits(shader, ortho, cx - 0.22f, scoreY, redCount, 1.0f, 0.35f, 0.35f);
         drawQuad(shader, ortho, cx, scoreY, 0.01f, 0.08f, 0.5f, 0.5f, 0.6f, 0.8f);
         drawDigits(shader, ortho, cx + 0.12f, scoreY, blueCount, 0.25f, 0.68f, 1.0f);
 
-        // "PLAY AGAIN" Button
+        // 4. "PLAY AGAIN" Button
         float btnX = cx;
-        float btnY = cy - 0.20f;
-        float btnW = 0.55f;
-        float btnH = 0.16f;
+        float btnY = cy - 0.24f;
+        float btnW = 0.58f;
+        float btnH = 0.15f;
 
         drawQuad(shader, ortho, btnX, btnY, btnW, btnH, 0.12f, 0.45f, 0.90f, 0.95f);
         drawQuad(shader, ortho, btnX, btnY - btnH * 0.5f, btnW, 0.01f, 0.6f, 0.85f, 1.0f, 0.95f);
-        drawTextString(shader, ortho, btnX, btnY, Strings::get(StringId::PLAY_AGAIN), 0.125f, 1.0f, 1.0f, 1.0f);
+        drawTextString(shader, ortho, btnX, btnY, Strings::get(StringId::PLAY_AGAIN), 0.115f, 1.0f, 1.0f, 1.0f);
+    }
+
+    void renderLeaveConfirmModal(const Shader& shader, const float* ortho, float aspect) const {
+        if (!showLeaveConfirmModal_) return;
+
+        // Dark background overlay
+        drawQuad(shader, ortho, 0.0f, 0.0f, aspect * 2.1f, 2.1f, 0.0f, 0.0f, 0.0f, 0.75f);
+
+        // Modal Card Container
+        float cx = 0.0f, cy = 0.02f;
+        float cardW = 1.25f, cardH = 0.52f;
+        drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.08f, 0.12f, 0.20f, 0.96f);
+        drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
+        drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.012f, 0.10f, 0.70f, 1.0f, 0.95f);
+
+        // Modal Question Title
+        std::string titleStr = (Strings::getLanguage() == Language::SPANISH) ?
+            "¿DESEAS SALIR DE LA SALA?" : "DO YOU WANT TO LEAVE THE ROOM?";
+        drawTextString(shader, ortho, cx, cy + 0.14f, titleStr, 0.115f, 1.0f, 0.90f, 0.20f);
+
+        // Option Buttons
+        float yesX = -0.28f, yesY = cy - 0.12f, btnW = 0.42f, btnH = 0.15f;
+        float noX = 0.28f, noY = cy - 0.12f;
+
+        // SÍ / YES Button (Red/Orange)
+        drawQuad(shader, ortho, yesX, yesY, btnW, btnH, 0.85f, 0.25f, 0.20f, 0.95f);
+        drawQuad(shader, ortho, yesX, yesY - btnH * 0.5f, btnW, 0.01f, 0.95f, 0.40f, 0.30f, 0.95f);
+        std::string yesStr = (Strings::getLanguage() == Language::SPANISH) ? "SÍ, SALIR" : "YES, LEAVE";
+        drawTextString(shader, ortho, yesX, yesY, yesStr, 0.105f, 1.0f, 1.0f, 1.0f);
+
+        // NO Button (Green/Cyan)
+        drawQuad(shader, ortho, noX, noY, btnW, btnH, 0.12f, 0.65f, 0.45f, 0.95f);
+        drawQuad(shader, ortho, noX, noY - btnH * 0.5f, btnW, 0.01f, 0.40f, 0.95f, 0.70f, 0.95f);
+        std::string noStr = (Strings::getLanguage() == Language::SPANISH) ? "CANCELAR" : "CANCEL";
+        drawTextString(shader, ortho, noX, noY, noStr, 0.105f, 1.0f, 1.0f, 1.0f);
     }
 
     void renderTopScorePanels(const Shader& shader, const float* ortho, float aspect, int redCount, int blueCount) const {
@@ -1042,17 +1232,22 @@ private:
     float uiCubeRot_;
     int lastCountdownSec_;
     bool isPrivateRoom_;
+    bool pendingJoinRoom_;
     std::string roomPin_;
     std::string roomName_;
     std::string selectedRoomId_;
     std::string userNickname_;
     bool isServerConnected_;
     int connectedPlayerCount_;
+    bool isOwner_;
+    std::string ownerId_;
     size_t filterTypeIndex_;
     int roomListScrollOffset_;
     std::vector<ServerRoomEntry> serverRooms_;
+    std::vector<PlayerInfo> currentRoomPlayers_;
     std::string joinNotificationText_;
     float joinNotificationTimer_;
+    bool showLeaveConfirmModal_;
     FontRenderer fontRenderer_;
 
     std::vector<Vertex> quadVertices_;

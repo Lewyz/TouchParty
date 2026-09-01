@@ -61,15 +61,51 @@ Java_com_lewyzstudio_touchparty_MainActivity_nativeOnRoomJoined(
 
 JNIEXPORT jboolean JNICALL
 Java_com_lewyzstudio_touchparty_MainActivity_nativeOnRoomStateUpdated(
-        JNIEnv *env, jclass clazz, jstring roomId, jstring roomName, jint playerCount, jboolean isPrivate, jstring ownerId, jstring state) {
+        JNIEnv *env, jclass clazz, jstring roomId, jstring roomName, jint playerCount, jboolean isPrivate, jstring ownerId, jboolean isOwner, jstring state, jstring playersJson) {
     if (!g_pRenderer) return JNI_FALSE;
     const char *nativeName = env->GetStringUTFChars(roomName, nullptr);
-    if (nativeName) {
-        g_pRenderer->getUI().onRoomStateUpdated(nativeName, playerCount, isPrivate == JNI_TRUE);
+    const char *nativeOwnerId = env->GetStringUTFChars(ownerId, nullptr);
+    const char *nativePlayersJson = env->GetStringUTFChars(playersJson, nullptr);
+    if (nativeName && nativeOwnerId && nativePlayersJson) {
+        g_pRenderer->getUI().onRoomStateUpdated(nativeName, playerCount, isPrivate == JNI_TRUE, nativeOwnerId, isOwner == JNI_TRUE, nativePlayersJson);
         env->ReleaseStringUTFChars(roomName, nativeName);
+        env->ReleaseStringUTFChars(ownerId, nativeOwnerId);
+        env->ReleaseStringUTFChars(playersJson, nativePlayersJson);
         return JNI_TRUE;
     }
     return JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeUpdateBoardCell(
+        JNIEnv *env, jclass clazz, jint x, jint y, jint colorState) {
+    if (!g_pRenderer) return JNI_FALSE;
+    g_pRenderer->getCubeGrid().setCubeState(x, y, static_cast<CubeState>(colorState));
+    return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeStartGameFromNetwork(
+        JNIEnv *env, jclass clazz) {
+    if (!g_pRenderer) return JNI_FALSE;
+    g_pRenderer->getCubeGrid().reset();
+    g_pRenderer->getUI().startCountdown();
+    return JNI_TRUE;
+}
+
+void nativeWsSendTap(android_app* app, int x, int y) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestSendTap", "(II)V");
+    if (method) {
+        env->CallVoidMethod(activityObj, method, static_cast<jint>(x), static_cast<jint>(y));
+    }
 }
 
 void nativeWsRequestCreateRoom(android_app* app, const std::string& name, bool isPrivate, const std::string& pin) {
@@ -122,6 +158,36 @@ void nativeWsRequestJoinRoom(android_app* app, const std::string& roomId, const 
         env->CallVoidMethod(activityObj, method, jRoomId, jPin);
         env->DeleteLocalRef(jRoomId);
         env->DeleteLocalRef(jPin);
+    }
+}
+
+void nativeWsRequestLeaveRoom(android_app* app) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestLeaveRoom", "()V");
+    if (method) {
+        env->CallVoidMethod(activityObj, method);
+    }
+}
+
+void nativeWsRequestStartGame(android_app* app) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestStartGame", "()V");
+    if (method) {
+        env->CallVoidMethod(activityObj, method);
     }
 }
 
