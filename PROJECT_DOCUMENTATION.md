@@ -106,6 +106,13 @@ Servidor Node.js Backend:
   - `leave` / `leave_room` -> `left_room_confirmed`: Clean exit from room.
   - `start` -> `game_started`: Synchronizes game start across all connected devices in room.
   - `tap` -> `room_state`: Transmits 3D cube taps `(col, row)` and broadcasts updated 12x10 board to all players in that room in real time.
+- **Reconexión Automática en Partida (`PLAYING`)**:
+  - Al reestablecerse el WebSocket en `GameWebSocketManager.kt` (`onOpen`), re-envía automáticamente la solicitud `join` con `currentRoomId` y `deviceId`.
+  - En el servidor (`game.js`), los jugadores desconectados se retienen en la piscina `disconnectedPlayers` para resguardar su estado en la partida activa.
+  - Durante el breve lapso de desconexión, las celdas pueden pasar temporalmente a blanco neutral (`#cccccc`), pero inmediatamente al completar el handshake de reconexión, el servidor envía la ráfaga `room_state` que restaura los colores originales del tablero 12x10 y re-sincroniza las puntuaciones de todos los jugadores en pantalla.
+- **Reinicio de Partidas ("OTRA VEZ")**:
+  - Sincronización del estado de fin de juego (`FINISHED` / `game_over`) hacia C++ para transicionar a `GameState::MATCH_OVER`.
+  - Al presionar "OTRA VEZ" desde la pantalla de resultados, el creador envía la orden `start`, reiniciando el temporizador a 90s y el tablero a neutral para todos los integrantes en la sala.
 - **Duplicate Room Name Check**: Server rejects creation if a room with the same name already exists.
 - **Nickname Disambiguation**: Auto-appends `02`, `03` (e.g. `Lewyz02`) if multiple players with identical nickname join the same room.
 - **Room Ownership Transfer**: If owner leaves, ownership automatically passes to the next player. If empty (`0` players), room is immediately destroyed on server (`rooms.delete(roomId)`).
@@ -141,6 +148,55 @@ Servidor Node.js Backend:
 > 1. Al finalizar cualquier cambio o tarea en este proyecto, DEBES indicar al usuario cómo verificar los cambios realizados.
 > 2. **INSTRUCCIONES DE DESPLIEGUE DEL SERVIDOR**: Las instrucciones de despliegue del VPS ÚNICAMENTE se deben incluir en el resumen final **SI Y SOLO SI se realizaron modificaciones en los archivos del servidor Node.js** (`/Users/lewyz/Downloads/home/admin/game-server/`).
 > 3. Si **NO** se modificaron archivos del servidor (por ejemplo, si solo se cambió código en Android / C++ / Kotlin), **NO DEBES incluir** la Guía de Despliegue del Servidor en tu respuesta final para evitar confusiones.
+
+### 5.1. Historial obligatorio de cambios para agentes IA
+
+Todos los agentes IA deben mantener un historial cronológico de cada cambio realizado en:
+
+`/Users/lewyz/Documents/ProyectsEnero2026.nosync/AgostoGames/PROJECT_CHANGE_HISTORY.md`
+
+El historial debe conservarse como un archivo Markdown separado de esta documentación técnica y debe incluir, como mínimo, una entrada por cambio con los siguientes datos:
+
+- **ID del cambio**: identificador consecutivo o único.
+- **Prompt solicitado**: solicitud original del usuario, o un resumen fiel si es demasiado extensa.
+- **Hora de inicio**: momento en que el usuario solicita el cambio.
+- **Hora de entrega**: momento en que el agente devuelve el resultado del cambio.
+- **Duración de implementación**: tiempo transcurrido entre inicio y entrega.
+- **Archivos modificados**: rutas de todos los archivos afectados, incluyendo archivos del backend si aplica.
+- **Verificación realizada**: pruebas, compilación y/o validaciones ejecutadas.
+- **Estado**: `Pendiente de prueba` hasta que el usuario confirme.
+- **Hora de prueba final**: momento en que el usuario escribe exactamente `Testeado`.
+
+Las horas deben registrarse en formato ISO 8601 usando la zona horaria local del proyecto (`America/Guatemala`, UTC-06:00), por ejemplo: `2026-09-01 19:48:00 -06:00`.
+
+Cuando el usuario escriba `Testeado`, el agente debe localizar el último cambio con estado `Pendiente de prueba`, agregar la hora de esa confirmación y cambiar su estado a `Testeado`. No se debe marcar un cambio como testeado antes de recibir esa confirmación explícita.
+
+Formato recomendado:
+
+```markdown
+## CHG-001 — Título breve del cambio
+
+- Inicio: 2026-09-01 19:30:00 -06:00
+- Entrega: 2026-09-01 19:48:00 -06:00
+- Duración de implementación: 18 minutos
+- Testeado: Pendiente
+- Hora de prueba final: Pendiente
+- Prompt: Corrección de transferencia de líder y residuos de salas.
+- Archivos modificados: `game.js`, `index.js`, `test.js`
+- Verificación: 9 pruebas backend y compilación Android exitosa.
+- Estado: Pendiente de prueba
+```
+
+El historial debe actualizarse sin borrar entradas anteriores. Si el agente no puede escribir el archivo, debe informarlo claramente al usuario y entregar la entrada completa para copiarla manualmente.
+
+### 5.2. Comandos abreviados para agentes IA
+
+Las siguientes palabras son convenciones permanentes del proyecto. No son comandos nativos de Git; el agente debe interpretarlas como instrucciones completas:
+
+- **`Rcommit`**: significa “realiza un commit del último cambio solicitado”. Antes de crear el commit, el agente debe revisar `git status` y el diff, incluir únicamente los archivos correspondientes a la última tarea y excluir cambios previos o ajenos. No debe realizar `push` al repositorio.
+- **`Testeado`**: significa que el usuario validó el último cambio. El agente debe localizar la última entrada con estado `Pendiente de prueba`, registrar la hora de confirmación en `America/Guatemala` y cambiar su estado a `Testeado`.
+
+Si el usuario necesita confirmar todos los cambios pendientes, puede escribir **`Rcommit todo`**. En ese caso, el agente debe mostrar primero el alcance de los archivos que serán incluidos y solicitar confirmación si existen cambios ajenos o ambiguos.
 
 ### Guía de Despliegue del Servidor (Incluir SOLO cuando se modifique el servidor Node.js):
 
