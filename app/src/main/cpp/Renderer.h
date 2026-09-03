@@ -24,6 +24,7 @@ public:
             width_(0),
             height_(0),
             shaderNeedsNewProjectionMatrix_(true),
+            multiTouchGesture_(false),
             lastTime_(std::chrono::high_resolution_clock::now()) {
         initRenderer();
     }
@@ -35,6 +36,7 @@ public:
 
     GameUI& getUI() { return gameUI_; }
     CubeGrid& getCubeGrid() { return cubeGrid_; }
+    android_app* getApp() const { return app_; }
 
 private:
     void initRenderer();
@@ -49,6 +51,7 @@ private:
     EGLint height_;
 
     bool shaderNeedsNewProjectionMatrix_;
+    bool multiTouchGesture_;
 
     std::unique_ptr<Shader> shader_;
     std::shared_ptr<TextureAsset> bgTexture_;

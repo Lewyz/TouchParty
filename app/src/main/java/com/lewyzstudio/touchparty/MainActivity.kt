@@ -44,10 +44,13 @@ class MainActivity : GameActivity() {
         external fun nativeSetServerRooms(jsonRooms: String): Boolean
 
         @JvmStatic
-        external fun nativeOnRoomJoined(roomId: String, isOwner: Boolean): Boolean
+        external fun nativeOnRoomJoined(roomId: String, isOwner: Boolean, team: String): Boolean
 
         @JvmStatic
-        external fun nativeOnRoomStateUpdated(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, isOwner: Boolean, state: String, playersJson: String): Boolean
+        external fun nativeOnRoomStateUpdated(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, isOwner: Boolean, state: String, playersJson: String, myTeam: String): Boolean
+
+        @JvmStatic
+        external fun nativeOnGameAborted(reason: String): Boolean
 
         @JvmStatic
         external fun nativeUpdateBoardCell(x: Int, y: Int, colorState: Int): Boolean
@@ -70,12 +73,12 @@ class MainActivity : GameActivity() {
         }
 
         @JvmStatic
-        fun sendRoomJoinedToNative(roomId: String, isOwner: Boolean) {
+        fun sendRoomJoinedToNative(roomId: String, isOwner: Boolean, team: String) {
             Thread {
                 var retries = 0
                 while (retries < 30) {
                     try {
-                        if (nativeOnRoomJoined(roomId, isOwner)) break
+                        if (nativeOnRoomJoined(roomId, isOwner, team)) break
                     } catch (_: Exception) {}
                     try { Thread.sleep(50) } catch (_: InterruptedException) { break }
                     retries++
@@ -84,12 +87,26 @@ class MainActivity : GameActivity() {
         }
 
         @JvmStatic
-        fun sendRoomStateToNative(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, isOwner: Boolean, state: String, playersJson: String) {
+        fun sendRoomStateToNative(roomId: String, roomName: String, playerCount: Int, isPrivate: Boolean, ownerId: String, isOwner: Boolean, state: String, playersJson: String, myTeam: String) {
             Thread {
                 var retries = 0
                 while (retries < 30) {
                     try {
-                        if (nativeOnRoomStateUpdated(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson)) break
+                        if (nativeOnRoomStateUpdated(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson, myTeam)) break
+                    } catch (_: Exception) {}
+                    try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+                    retries++
+                }
+            }.start()
+        }
+
+        @JvmStatic
+        fun sendGameAbortedToNative(reason: String) {
+            Thread {
+                var retries = 0
+                while (retries < 30) {
+                    try {
+                        if (nativeOnGameAborted(reason)) break
                     } catch (_: Exception) {}
                     try { Thread.sleep(50) } catch (_: InterruptedException) { break }
                     retries++
@@ -176,6 +193,14 @@ class MainActivity : GameActivity() {
     fun requestLeaveRoom() {
         GameWebSocketManager.leaveRoom()
         GameWebSocketManager.listRooms()
+    }
+
+    fun requestReturnToRoom() {
+        GameWebSocketManager.returnToRoom()
+    }
+
+    fun requestSetTeam(team: String) {
+        GameWebSocketManager.setTeam(team)
     }
 
     fun requestStartGame() {

@@ -17,6 +17,8 @@ void nativeWsRequestCreateRoom(android_app* app, const std::string& name, bool i
 void nativeWsRequestListRooms(android_app* app);
 void nativeWsRequestJoinRoom(android_app* app, const std::string& roomId, const std::string& pin);
 void nativeWsRequestLeaveRoom(android_app* app);
+void nativeWsRequestReturnToRoom(android_app* app);
+void nativeWsRequestSetTeam(android_app* app, const std::string& team);
 void nativeWsRequestStartGame(android_app* app);
 void nativeWsSendTap(android_app* app, int x, int y);
 }
@@ -73,13 +75,20 @@ Renderer::~Renderer() {
 
 static void computeCameraMatrices(float width, float height, float* proj, float* view, float* viewProj) {
     float aspect = width / height;
-    float fov = 44.0f;
+    float baseFov = 44.0f;
+    float camY = 11.5f;
+    float camZ = 10.5f;
+
     if (aspect < 1.6f) {
-        fov = 44.0f * (1.6f / aspect);
+        // Smoothly adjust FOV and camera distance for tablets (4:3, 16:10, 3:2) to avoid distortion
+        float factor = 1.6f / aspect;
+        baseFov = 44.0f * (1.0f + (factor - 1.0f) * 0.70f);
+        camY = 11.5f * (1.0f + (factor - 1.0f) * 0.30f);
+        camZ = 10.5f * (1.0f + (factor - 1.0f) * 0.30f);
     }
 
-    MatrixMath::perspective(proj, degToRad(fov), aspect, 0.1f, 100.0f);
-    MatrixMath::lookAt(view, Vec3(0.0f, 11.5f, 10.5f), Vec3(0.0f, -0.4f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
+    MatrixMath::perspective(proj, degToRad(baseFov), aspect, 0.1f, 100.0f);
+    MatrixMath::lookAt(view, Vec3(0.0f, camY, camZ), Vec3(0.0f, -0.4f, 0.0f), Vec3(0.0f, 1.0f, 0.0f));
     MatrixMath::multiply(viewProj, proj, view);
 }
 
@@ -248,6 +257,7 @@ void Renderer::initRenderer() {
     auto assetManager = app_->activity->assetManager;
     bgTexture_ = TextureAsset::loadAsset(assetManager, "background_cubes.jpeg");
     gameUI_.initFont(assetManager, "calculator.ttf");
+    gameUI_.initCursorSprites(assetManager);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -289,7 +299,16 @@ void Renderer::handleInput() {
         auto y = GameActivityPointerAxes_getY(&pointer);
 
         int actionMasked = action & AMOTION_EVENT_ACTION_MASK;
-        if (actionMasked == AMOTION_EVENT_ACTION_DOWN || actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN) {
+        if (motionEvent.pointerCount > 1 ||
+            actionMasked == AMOTION_EVENT_ACTION_POINTER_DOWN ||
+            actionMasked == AMOTION_EVENT_ACTION_POINTER_UP) {
+            // Once a second pointer is detected, cancel the complete gesture.
+            // This prevents the first finger from capturing a cube before the
+            // second finger is released.
+            multiTouchGesture_ = true;
+        }
+
+        if (actionMasked == AMOTION_EVENT_ACTION_DOWN) {
             // 1. Try handling touch on 2D Game UI (Play, Create, Join, Back, or Reset button)
             TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_, app_);
 
@@ -299,6 +318,10 @@ void Renderer::handleInput() {
                 nativeWsRequestListRooms(app_);
             } else if (uiAction == TouchAction::JOIN_SELECTED_ROOM) {
                 nativeWsRequestJoinRoom(app_, gameUI_.getSelectedRoomId(), gameUI_.getRoomPin());
+            } else if (uiAction == TouchAction::RETURN_TO_ROOM_LOBBY) {
+                nativeWsRequestReturnToRoom(app_);
+            } else if (uiAction == TouchAction::CHANGE_TEAM) {
+                nativeWsRequestSetTeam(app_, gameUI_.getPendingTeam());
             } else if (uiAction == TouchAction::LEAVE_ROOM_LOBBY || uiAction == TouchAction::BACK_TO_WELCOME) {
                 nativeWsRequestLeaveRoom(app_);
             } else if (uiAction == TouchAction::START_MULTIPLAYER_GAME) {
@@ -311,9 +334,12 @@ void Renderer::handleInput() {
                 if (gameUI_.getState() == GameState::COUNTDOWN || gameUI_.getState() == GameState::PLAYING) {
                     cubeGrid_.reset();
                     particleSystem_.clear();
-                    AudioEngine::triggerCountdownAudio(app_);
                 }
-            } else if (gameUI_.getState() == GameState::PLAYING && gameUI_.isServerConnected()) {
+            }
+        } else if (actionMasked == AMOTION_EVENT_ACTION_UP) {
+            // A cube is captured only when a complete gesture had exactly one
+            // pointer. Multi-touch gestures are intentionally ignored.
+            if (!multiTouchGesture_ && gameUI_.getState() == GameState::PLAYING && gameUI_.isServerConnected()) {
                 // 2. Unproject screen touch to 3D ray for Cube Picking
                 float proj[16], view[16], viewProj[16], invViewProj[16];
                 computeCameraMatrices(float(width_), float(height_), proj, view, viewProj);
@@ -346,6 +372,9 @@ void Renderer::handleInput() {
                     }
                 }
             }
+            multiTouchGesture_ = false;
+        } else if (actionMasked == AMOTION_EVENT_ACTION_CANCEL) {
+            multiTouchGesture_ = false;
         }
     }
 

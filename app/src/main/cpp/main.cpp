@@ -48,34 +48,56 @@ Java_com_lewyzstudio_touchparty_MainActivity_nativeSetServerRooms(
 
 JNIEXPORT jboolean JNICALL
 Java_com_lewyzstudio_touchparty_MainActivity_nativeOnRoomJoined(
-        JNIEnv *env, jclass clazz, jstring roomId, jboolean isOwner) {
+        JNIEnv *env, jclass clazz, jstring roomId, jboolean isOwner, jstring team) {
     if (!g_pRenderer) return JNI_FALSE;
     const char *nativeString = env->GetStringUTFChars(roomId, nullptr);
-    if (nativeString) {
-        g_pRenderer->getUI().onRoomJoined(nativeString, isOwner == JNI_TRUE);
+    const char *nativeTeam = env->GetStringUTFChars(team, nullptr);
+    if (nativeString && nativeTeam) {
+        g_pRenderer->getUI().onRoomJoined(nativeString, isOwner == JNI_TRUE, nativeTeam);
         env->ReleaseStringUTFChars(roomId, nativeString);
+        env->ReleaseStringUTFChars(team, nativeTeam);
         return JNI_TRUE;
     }
+    if (nativeString) env->ReleaseStringUTFChars(roomId, nativeString);
+    if (nativeTeam) env->ReleaseStringUTFChars(team, nativeTeam);
     return JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_lewyzstudio_touchparty_MainActivity_nativeOnRoomStateUpdated(
-        JNIEnv *env, jclass clazz, jstring roomId, jstring roomName, jint playerCount, jboolean isPrivate, jstring ownerId, jboolean isOwner, jstring state, jstring playersJson) {
+        JNIEnv *env, jclass clazz, jstring roomId, jstring roomName, jint playerCount, jboolean isPrivate, jstring ownerId, jboolean isOwner, jstring state, jstring playersJson, jstring myTeam) {
     if (!g_pRenderer) return JNI_FALSE;
     const char *nativeName = env->GetStringUTFChars(roomName, nullptr);
     const char *nativeOwnerId = env->GetStringUTFChars(ownerId, nullptr);
     const char *nativeState = env->GetStringUTFChars(state, nullptr);
     const char *nativePlayersJson = env->GetStringUTFChars(playersJson, nullptr);
-    if (nativeName && nativeOwnerId && nativeState && nativePlayersJson) {
-        g_pRenderer->getUI().onRoomStateUpdated(nativeName, playerCount, isPrivate == JNI_TRUE, nativeOwnerId, isOwner == JNI_TRUE, nativeState, nativePlayersJson);
+    const char *nativeTeam = env->GetStringUTFChars(myTeam, nullptr);
+    if (nativeName && nativeOwnerId && nativeState && nativePlayersJson && nativeTeam) {
+        g_pRenderer->getUI().onRoomStateUpdated(nativeName, playerCount, isPrivate == JNI_TRUE, nativeOwnerId, isOwner == JNI_TRUE, nativeState, nativePlayersJson, nativeTeam);
         env->ReleaseStringUTFChars(roomName, nativeName);
         env->ReleaseStringUTFChars(ownerId, nativeOwnerId);
         env->ReleaseStringUTFChars(state, nativeState);
         env->ReleaseStringUTFChars(playersJson, nativePlayersJson);
+        env->ReleaseStringUTFChars(myTeam, nativeTeam);
         return JNI_TRUE;
     }
+    if (nativeName) env->ReleaseStringUTFChars(roomName, nativeName);
+    if (nativeOwnerId) env->ReleaseStringUTFChars(ownerId, nativeOwnerId);
+    if (nativeState) env->ReleaseStringUTFChars(state, nativeState);
+    if (nativePlayersJson) env->ReleaseStringUTFChars(playersJson, nativePlayersJson);
+    if (nativeTeam) env->ReleaseStringUTFChars(myTeam, nativeTeam);
     return JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeOnGameAborted(
+        JNIEnv *env, jclass clazz, jstring reason) {
+    if (!g_pRenderer) return JNI_FALSE;
+    const char *nativeReason = env->GetStringUTFChars(reason, nullptr);
+    if (!nativeReason) return JNI_FALSE;
+    g_pRenderer->getUI().onGameAborted(nativeReason);
+    env->ReleaseStringUTFChars(reason, nativeReason);
+    return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -91,7 +113,7 @@ Java_com_lewyzstudio_touchparty_MainActivity_nativeStartGameFromNetwork(
         JNIEnv *env, jclass clazz) {
     if (!g_pRenderer) return JNI_FALSE;
     g_pRenderer->getCubeGrid().reset();
-    g_pRenderer->getUI().startCountdown();
+    g_pRenderer->getUI().startCountdown(nullptr, g_pRenderer->getApp());
     return JNI_TRUE;
 }
 
@@ -175,6 +197,36 @@ void nativeWsRequestLeaveRoom(android_app* app) {
     jmethodID method = env->GetMethodID(activityClass, "requestLeaveRoom", "()V");
     if (method) {
         env->CallVoidMethod(activityObj, method);
+    }
+}
+
+void nativeWsRequestReturnToRoom(android_app* app) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestReturnToRoom", "()V");
+    if (method) env->CallVoidMethod(activityObj, method);
+}
+
+void nativeWsRequestSetTeam(android_app* app, const std::string& team) {
+    if (!app || !app->activity || !app->activity->vm) return;
+    JavaVM* vm = app->activity->vm;
+    JNIEnv* env = nullptr;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        if (vm->AttachCurrentThread(&env, nullptr) != 0) return;
+    }
+    jobject activityObj = app->activity->javaGameActivity;
+    jclass activityClass = env->GetObjectClass(activityObj);
+    jmethodID method = env->GetMethodID(activityClass, "requestSetTeam", "(Ljava/lang/String;)V");
+    if (method) {
+        jstring jTeam = env->NewStringUTF(team.c_str());
+        env->CallVoidMethod(activityObj, method, jTeam);
+        env->DeleteLocalRef(jTeam);
     }
 }
 

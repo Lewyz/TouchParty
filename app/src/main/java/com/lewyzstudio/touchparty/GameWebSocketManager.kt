@@ -18,6 +18,8 @@ object GameWebSocketManager {
     private var currentRoomId: String? = null
     private var myPlayerId: String? = null
     private var isRoomOwner = false
+    private var myTeam = "BLUE"
+    private var returnedToRoom = false
 
     fun init() {
         if (client == null) {
@@ -95,6 +97,15 @@ object GameWebSocketManager {
         }, 3000)
     }
 
+    private fun playersJsonWithLocalMarker(playersArray: JSONArray?): String {
+        if (playersArray == null) return "[]"
+        for (i in 0 until playersArray.length()) {
+            val playerObj = playersArray.optJSONObject(i) ?: continue
+            playerObj.put("isLocal", playerObj.optString("id") == myPlayerId)
+        }
+        return playersArray.toString()
+    }
+
     private fun handleMessage(text: String) {
         try {
             val json = JSONObject(text)
@@ -107,13 +118,25 @@ object GameWebSocketManager {
                     val roomId = json.optString("roomId", "")
                     val isOwner = json.optBoolean("isOwner", false)
                     val playerId = json.optString("playerId", "")
+                    val team = json.optString("team", "BLUE")
+                    val wasRejoiningSameRoom = currentRoomId == roomId && myPlayerId != null
                     if (playerId.isNotEmpty()) myPlayerId = playerId
                     currentRoomId = roomId
                     isRoomOwner = isOwner
-                    MainActivity.sendRoomJoinedToNative(roomId, isOwner)
+                    myTeam = team
+                    if (!wasRejoiningSameRoom) returnedToRoom = false
+                    MainActivity.sendRoomJoinedToNative(roomId, isOwner, myTeam)
                 }
                 "game_started" -> {
-                    MainActivity.sendStartGameToNative()
+                    // A player who already returned to the room does not
+                    // re-enter a later match started by another player.
+                    if (!returnedToRoom) {
+                        MainActivity.sendStartGameToNative()
+                    }
+                }
+                "game_aborted" -> {
+                    val reason = json.optString("reason", "La partida finalizó porque quedaron menos de 2 jugadores.")
+                    MainActivity.sendGameAbortedToNative(reason)
                 }
                 "game_over" -> {
                     val roomObj = json.optJSONObject("room")
@@ -128,11 +151,11 @@ object GameWebSocketManager {
                         val isOwner = if (!myPlayerId.isNullOrEmpty() && ownerId.isNotEmpty()) (myPlayerId == ownerId) else isRoomOwner
 
                         val playersArray = roomObj.optJSONArray("players")
-                        val playersJson = playersArray?.toString() ?: "[]"
+                        val playersJson = playersJsonWithLocalMarker(playersArray)
 
-                        MainActivity.sendRoomStateToNative(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson)
+                        MainActivity.sendRoomStateToNative(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson, myTeam)
                     } else {
-                        MainActivity.sendRoomStateToNative(roomId, "", 1, false, "", isRoomOwner, "FINISHED", "[]")
+                        MainActivity.sendRoomStateToNative(roomId, "", 1, false, "", isRoomOwner, "FINISHED", "[]", myTeam)
                     }
                 }
                 "room_state" -> {
@@ -145,17 +168,25 @@ object GameWebSocketManager {
                         val ownerId = roomObj.optString("ownerId", "")
                         val state = roomObj.optString("state", "LOBBY")
 
-                        if (!myPlayerId.isNullOrEmpty() && ownerId.isNotEmpty()) {
-                            if (myPlayerId == ownerId) {
-                                isRoomOwner = true
+                        val playersArray = roomObj.optJSONArray("players")
+                        if (playersArray != null && !myPlayerId.isNullOrEmpty()) {
+                            for (i in 0 until playersArray.length()) {
+                                val playerObj = playersArray.optJSONObject(i) ?: continue
+                                if (playerObj.optString("id") == myPlayerId) {
+                                    myTeam = playerObj.optString("team", myTeam)
+                                    break
+                                }
                             }
                         }
+
+                        // The server is authoritative. This also updates the
+                        // next player immediately after an owner leaves.
+                        isRoomOwner = !myPlayerId.isNullOrEmpty() && ownerId.isNotEmpty() && myPlayerId == ownerId
                         val isOwner = isRoomOwner
 
-                        val playersArray = roomObj.optJSONArray("players")
-                        val playersJson = playersArray?.toString() ?: "[]"
+                        val playersJson = playersJsonWithLocalMarker(playersArray)
 
-                        MainActivity.sendRoomStateToNative(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson)
+                        MainActivity.sendRoomStateToNative(roomId, roomName, playerCount, isPrivate, ownerId, isOwner, state, playersJson, myTeam)
 
                         val boardArray = roomObj.optJSONArray("board")
                         if (boardArray != null) {
@@ -233,9 +264,28 @@ object GameWebSocketManager {
         currentRoomId = null
         myPlayerId = null
         isRoomOwner = false
+        myTeam = "BLUE"
+        returnedToRoom = false
+    }
+
+    fun returnToRoom() {
+        returnedToRoom = true
+        val json = JSONObject()
+        json.put("type", "return_to_room")
+        sendJson(json)
+    }
+
+    fun setTeam(team: String) {
+        val normalizedTeam = if (team.uppercase() == "RED") "RED" else "BLUE"
+        myTeam = normalizedTeam
+        val json = JSONObject()
+        json.put("type", "set_team")
+        json.put("team", normalizedTeam)
+        sendJson(json)
     }
 
     fun sendStartGame() {
+        returnedToRoom = false
         val json = JSONObject()
         json.put("type", "start")
         sendJson(json)

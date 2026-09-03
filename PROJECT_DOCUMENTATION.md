@@ -14,6 +14,7 @@ Comprehensive technical documentation for the **Touchparty** Android 3D Game Eng
 - **Input & Haptics**:
   - `GameActivity` motion event polling
   - Android NDK JNI bridge to `Vibrator` / `VibratorManager`
+  - Cube capture accepts only a completed single-pointer touch; any multi-touch gesture is cancelled without changing a cube.
 - **Networking & Real-Time Sync**:
   - **OkHttp 4.12.0 WebSocket** client (`wss://game.tutaxi502.com`)
   - **Node.js ES Module Backend** (`/Users/lewyz/Downloads/home/admin/game-server/`)
@@ -43,7 +44,11 @@ app/src/main/
 │   ├── MainActivity.kt       # GameActivity subclass, health check loop, nickname persistence & JNI bridges
 │   └── GameWebSocketManager.kt # OkHttp WebSocket client, JSON message parser & real-time event router
 ├── assets/
-│   └── background_cubes.jpeg # Sci-fi laboratory background image texture
+│   ├── background_cubes.jpeg # Sci-fi laboratory background image texture
+│   ├── arrow_red_left.png     # Red team left arrow sprite
+│   ├── arrow_blue_left.png    # Blue team left arrow sprite
+│   ├── arrow_blue_right.png   # Blue team right arrow sprite
+│   └── arrow_red_right.png    # Red team right arrow sprite
 └── res/raw/
     └── countdown_party.mp3   # Countdown audio track (3, 2, 1, GO!)
 
@@ -86,8 +91,13 @@ Servidor Node.js Backend:
   - Deduplicación estricta por `entry.id` para evitar filas duplicadas.
 - **Redesigned Expanded Lobby Screen (`renderRoomLobbyScreen`)**:
   - Escala ampliada (+50%) abarcando la pantalla landscape (`cardW = 2.65f`, `cardH = 1.25f`).
-  - **Columna Izquierda**: Estado de la sala, conteo `JUGADORES: X/8` y botón `INICIAR PARTIDA (X/8)` para el Creador o `ESPERANDO AL CREADOR...` para integrantes.
-  - **Columna Derecha (`INTEGRANTES DE LA SALA`)**: Lista en tiempo real de jugadores conectados. Creador destacado en dorado `[CREADOR] NickName` y miembros regulares en cian.
+  - **Equipo azul a la izquierda y equipo rojo a la derecha**: cada jugador aparece en su columna según el equipo autoritativo recibido del servidor.
+  - El creador conserva el resaltado dorado `[CREADOR]`; su resaltado no impide que pueda cambiar de equipo.
+  - Cada jugador puede pulsar la flecha de su propia fila para cambiar entre `BLUE` y `RED` mientras la sala está en lobby.
+  - El conteo y la lista se actualizan en tiempo real; los jugadores desconectados temporalmente durante una partida no se muestran como conectados.
+  - En el lobby, el panel de conteo queda elevado y ampliado; el aviso de jugadores requeridos usa un panel más ancho y contraste claro para no mezclar texto rojo con fondo rojo.
+  - El botón de inicio solo está disponible para el propietario cuando hay al menos dos jugadores y no hay una partida activa.
+  - El cambio de equipo usa sprites individuales (`arrow_red_left.png`, `arrow_blue_left.png`, `arrow_blue_right.png`, `arrow_red_right.png`) y conserva su transparencia y brillo originales.
 - **Confirmation Exit Modal (`renderLeaveConfirmModal`)**:
   - Displays `"¿DESEAS SALIR DE LA SALA?"` modal card when tapping "SALIR DE SALA" or "VOLVER" in lobby.
   - `[SÍ, SALIR]` sends WebSocket `leave` to server, destroys room if empty, and returns to main menu.
@@ -102,7 +112,9 @@ Servidor Node.js Backend:
 - **Local NickName Persistence**: Stored in `SharedPreferences` (`"user_nickname"`). Prompted ONLY on first launch. Sent to C++ via thread-safe JNI retry loop.
 - **WebSocket Protocol**:
   - `list_rooms` -> `rooms_list`: Populates `serverRooms_` vector dynamically in C++.
-  - `join` -> `joined` / `room_state`: Joins room, assigns stable player ID and unique color.
+  - `join` -> `joined` / `room_state`: Joins room, assigns stable player ID, team (`BLUE`/`RED`) and team color.
+  - `set_team` -> `room_state`: Changes the requesting player's team while waiting in the lobby.
+  - `return_to_room` -> `returned_to_room` / `game_aborted` / `room_state`: Returns from the active match without leaving the room; an active match with fewer than two players is aborted and routed to the room lobby.
   - `leave` / `leave_room` -> `left_room_confirmed`: Clean exit from room.
   - `start` -> `game_started`: Synchronizes game start across all connected devices in room.
   - `tap` -> `room_state`: Transmits 3D cube taps `(col, row)` and broadcasts updated 12x10 board to all players in that room in real time.
@@ -112,10 +124,14 @@ Servidor Node.js Backend:
   - Durante el breve lapso de desconexión, las celdas pueden pasar temporalmente a blanco neutral (`#cccccc`), pero inmediatamente al completar el handshake de reconexión, el servidor envía la ráfaga `room_state` que restaura los colores originales del tablero 12x10 y re-sincroniza las puntuaciones de todos los jugadores en pantalla.
 - **Reinicio de Partidas ("OTRA VEZ")**:
   - Sincronización del estado de fin de juego (`FINISHED` / `game_over`) hacia C++ para transicionar a `GameState::MATCH_OVER`.
-  - Al presionar "OTRA VEZ" desde la pantalla de resultados, el creador envía la orden `start`, reiniciando el temporizador a 90s y el tablero a neutral para todos los integrantes en la sala.
+  - Al presionar "OTRA VEZ" desde la pantalla de resultados, el creador envía la orden `start`, reiniciando el temporizador a 94s del servidor (90s jugables después de los 4s de presentación) y el tablero a neutral para todos los integrantes en la sala.
 - **Duplicate Room Name Check**: Server rejects creation if a room with the same name already exists.
 - **Nickname Disambiguation**: Auto-appends `02`, `03` (e.g. `Lewyz02`) if multiple players with identical nickname join the same room.
 - **Room Ownership Transfer**: If owner leaves, ownership automatically passes to the next player. If empty (`0` players), room is immediately destroyed on server (`rooms.delete(roomId)`).
+- **Room Default Name**: A room created without a name uses `Lobby`.
+- **Team Assignment and Ownership**: The server assigns new players to the smaller team (`BLUE` first, `RED` second), sends each player's `team` and `color`, and accepts `set_team` only while the room is in `LOBBY`. A lobby reconnection preserves the existing owner role.
+- **Return From Match**: `return_to_room` keeps the player in the same room and returns its UI to `ROOM_LOBBY`. If the active match would have fewer than two players, the server changes the room to `LOBBY`, clears the match timer/board, and broadcasts `game_aborted` with the reason.
+- **In-Match Player List**: `room_state.players` includes `connected: true|false`; Android marks the local player with `isLocal`, and the C++ UI displays connected players grouped by team during the match.
 
 ---
 
@@ -123,6 +139,7 @@ Servidor Node.js Backend:
 
 > [!NOTE]
 > - **Flujo de Verificación de PIN para Salas Privadas**: Revisión pendiente para el diálogo emergente de PIN antes de unirse y la visibilidad esporádica de salas privadas en la pantalla `SALAS DISPONIBLES`.
+> - **Transición de colores al tocar un cubo**: Pendiente de definir y corregir la secuencia de estados para que el cubo vaya directamente al color del equipo local. No modificar como parte del bloqueo de multitouch.
 
 ---
 
@@ -136,7 +153,13 @@ Servidor Node.js Backend:
         │
    (Owner Starts)
         ▼
-   [COUNTDOWN] ──(4 seconds)──> [PLAYING (Real-Time 3D Taps)] ──(30s)──> [MATCH_OVER]
+   [COUNTDOWN] ──(4 seconds)──> [PLAYING (Real-Time 3D Taps)] ──(94s server / 90s playable)──> [MATCH_OVER]
+                                  │                         │
+                         (Salir / return_to_room)   (return_to_room)
+                                  ▼                         ▼
+                         [ROOM_LOBBY] ◄────────────── [ROOM_LOBBY]
+                                  │
+                         (<2 activos: game_aborted)
 ```
 
 ---
@@ -148,6 +171,7 @@ Servidor Node.js Backend:
 > 1. Al finalizar cualquier cambio o tarea en este proyecto, DEBES indicar al usuario cómo verificar los cambios realizados.
 > 2. **INSTRUCCIONES DE DESPLIEGUE DEL SERVIDOR**: Las instrucciones de despliegue del VPS ÚNICAMENTE se deben incluir en el resumen final **SI Y SOLO SI se realizaron modificaciones en los archivos del servidor Node.js** (`/Users/lewyz/Downloads/home/admin/game-server/`).
 > 3. Si **NO** se modificaron archivos del servidor (por ejemplo, si solo se cambió código en Android / C++ / Kotlin), **NO DEBES incluir** la Guía de Despliegue del Servidor en tu respuesta final para evitar confusiones.
+> 4. La respuesta final DEBE incluir una sección breve y concreta de comprobación, con los comandos de prueba, compilación o pasos manuales necesarios según el tipo de cambio.
 
 ### 5.1. Historial obligatorio de cambios para agentes IA
 

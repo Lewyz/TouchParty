@@ -47,6 +47,8 @@ enum class TouchAction {
     REFRESH_ROOMS,
     SIMULATE_ADD_PLAYER,
     START_MULTIPLAYER_GAME,
+    RETURN_TO_ROOM_LOBBY,
+    CHANGE_TEAM,
     LEAVE_ROOM_LOBBY,
     BACK_TO_WELCOME,
     BACK_TO_LOBBY,
@@ -66,6 +68,9 @@ struct ServerRoomEntry {
 struct PlayerInfo {
     std::string id;
     std::string name;
+    std::string team;
+    bool isLocal = false;
+    bool connected = true;
     bool isOwner = false;
 };
 
@@ -79,7 +84,7 @@ public:
           lastCountdownSec_(-1),
           isPrivateRoom_(false),
           roomPin_("1234"),
-          roomName_("SALA DE JUGADOR"),
+          roomName_("Lobby"),
           userNickname_(""),
           isServerConnected_(false),
           connectedPlayerCount_(1),
@@ -88,6 +93,11 @@ public:
           roomListScrollOffset_(0),
           joinNotificationTimer_(0.0f),
           showLeaveConfirmModal_(false),
+          leaveModalFromMatch_(false),
+          returnedToRoomFromMatch_(false),
+          roomMatchActive_(false),
+          pendingTeam_("BLUE"),
+          myTeam_("BLUE"),
           pendingJoinRoom_(false),
           reconnectTimer_(0.0f) {
         initQuadGeometry();
@@ -122,6 +132,13 @@ public:
 
     void initFont(AAssetManager* assetManager, const std::string& fontPath = "calculator.ttf") {
         fontRenderer_.loadFont(assetManager, fontPath, 128.0f);
+    }
+
+    void initCursorSprites(AAssetManager* assetManager) {
+        arrowRedLeftTexture_ = TextureAsset::loadAsset(assetManager, "arrow_red_left.png");
+        arrowBlueLeftTexture_ = TextureAsset::loadAsset(assetManager, "arrow_blue_left.png");
+        arrowBlueRightTexture_ = TextureAsset::loadAsset(assetManager, "arrow_blue_right.png");
+        arrowRedRightTexture_ = TextureAsset::loadAsset(assetManager, "arrow_red_right.png");
     }
 
     void triggerJoinNotification(const std::string& playerName) {
@@ -213,26 +230,49 @@ public:
         roomListScrollOffset_ = 0;
     }
 
-    void onRoomJoined(const std::string& roomId, bool isOwner) {
+    void onRoomJoined(const std::string& roomId, bool isOwner, const std::string& team = "BLUE") {
+        bool preserveLobbyAfterReconnect = state_ == GameState::ROOM_LOBBY && returnedToRoomFromMatch_;
         state_ = GameState::ROOM_LOBBY;
         isOwner_ = isOwner;
+        myTeam_ = team == "RED" ? "RED" : "BLUE";
+        if (!preserveLobbyAfterReconnect) {
+            returnedToRoomFromMatch_ = false;
+            roomMatchActive_ = false;
+        }
         if (isOwner) {
             connectedPlayerCount_ = 1;
         }
     }
 
-    void onRoomStateUpdated(const std::string& name, int playerCount, bool isPrivate, const std::string& ownerId, bool isOwner, const std::string& state, const std::string& playersJson) {
+    void onRoomStateUpdated(const std::string& name, int playerCount, bool isPrivate, const std::string& ownerId, bool isOwner, const std::string& state, const std::string& playersJson, const std::string& myTeam) {
         if (!name.empty()) roomName_ = name;
         isPrivateRoom_ = isPrivate;
         ownerId_ = ownerId;
+        myTeam_ = myTeam == "RED" ? "RED" : "BLUE";
 
         if (state == "FINISHED") {
-            state_ = GameState::MATCH_OVER;
-        } else if (state == "PLAYING" && (state_ == GameState::ROOM_LOBBY || state_ == GameState::COUNTDOWN || state_ == GameState::WELCOME)) {
+            if (returnedToRoomFromMatch_) {
+                // A player who voluntarily returned to the room stays there
+                // when the match later finishes for the other players.
+                state_ = GameState::ROOM_LOBBY;
+            } else {
+                state_ = GameState::MATCH_OVER;
+            }
+            roomMatchActive_ = false;
+        } else if (state == "PLAYING" && !returnedToRoomFromMatch_ &&
+                   (state_ == GameState::ROOM_LOBBY || state_ == GameState::WELCOME)) {
             state_ = GameState::PLAYING;
+            roomMatchActive_ = true;
             reconnectTimer_ = 0.0f;
-        } else if (state == "LOBBY" && state_ == GameState::MATCH_OVER) {
+        } else if (state == "PLAYING") {
+            roomMatchActive_ = true;
+        } else if (state == "LOBBY" &&
+                   (state_ == GameState::MATCH_OVER || state_ == GameState::PLAYING || state_ == GameState::COUNTDOWN)) {
             state_ = GameState::ROOM_LOBBY;
+            roomMatchActive_ = false;
+            returnedToRoomFromMatch_ = false;
+        } else if (state == "LOBBY") {
+            roomMatchActive_ = false;
         }
 
         // Parse players JSON array from server: [{"id":"...","name":"..."},...]
@@ -256,8 +296,13 @@ public:
             PlayerInfo p;
             p.id = getVal("id");
             p.name = getVal("name");
+            p.team = getVal("team");
+            p.isLocal = getVal("isLocal") == "true" || getVal("isLocal") == "1";
+            std::string connectedValue = getVal("connected");
+            p.connected = connectedValue.empty() || connectedValue == "true" || connectedValue == "1";
+            if (p.team != "RED") p.team = "BLUE";
             p.isOwner = (!p.id.empty() && p.id == ownerId_);
-            if (!p.name.empty()) {
+            if (!p.name.empty() && p.connected) {
                 currentRoomPlayers_.push_back(p);
             }
             pos = endPos + 1;
@@ -285,12 +330,25 @@ public:
         isOwner_ = isOwner;
     }
 
-    void startCountdown(AudioEngine* audioEngine = nullptr) {
+    void onGameAborted(const std::string& reason) {
+        state_ = GameState::ROOM_LOBBY;
+        roomMatchActive_ = false;
+        returnedToRoomFromMatch_ = false;
+        joinNotificationText_ = "PARTIDA FINALIZADA: " + reason;
+        joinNotificationTimer_ = 6.0f;
+    }
+
+    const std::string& getPendingTeam() const { return pendingTeam_; }
+
+    void startCountdown(AudioEngine* audioEngine = nullptr, android_app* app = nullptr) {
         state_ = GameState::COUNTDOWN;
+        roomMatchActive_ = true;
+        returnedToRoomFromMatch_ = false;
         countdownTimer_ = 0.0f;
         matchTimer_ = 90.0f;
         lastCountdownSec_ = -1;
         if (audioEngine) audioEngine->playCountdownBeep();
+        if (app) AudioEngine::triggerCountdownAudio(app);
     }
 
     void update(float deltaTime, AudioEngine* audioEngine = nullptr) {
@@ -350,8 +408,16 @@ public:
 
             if (std::abs(normX - yesX) <= btnW * 0.5f + 0.04f &&
                 std::abs(normY - yesY) <= btnH * 0.5f + 0.04f) {
+                bool returningFromMatch = leaveModalFromMatch_;
                 showLeaveConfirmModal_ = false;
+                if (returningFromMatch) {
+                    state_ = GameState::ROOM_LOBBY;
+                    returnedToRoomFromMatch_ = true;
+                    if (audioEngine) audioEngine->playCountdownBeep();
+                    return TouchAction::RETURN_TO_ROOM_LOBBY;
+                }
                 state_ = GameState::WELCOME;
+                returnedToRoomFromMatch_ = false;
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::LEAVE_ROOM_LOBBY;
             }
@@ -374,6 +440,7 @@ public:
             if (std::abs(normX - resetX) <= resetW * 0.5f + 0.04f &&
                 std::abs(normY - resetY) <= resetH * 0.5f + 0.04f) {
                 showLeaveConfirmModal_ = true;
+                leaveModalFromMatch_ = true;
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::NONE;
             }
@@ -386,7 +453,7 @@ public:
             if (std::abs(normX - testX) <= testW * 0.5f + 0.04f &&
                 std::abs(normY - testY) <= testH * 0.5f + 0.04f) {
                 connectedPlayerCount_ = 2; // Local 1v1 practice test
-                startCountdown(audioEngine);
+                startCountdown(audioEngine, app);
                 return TouchAction::START_LOCAL_GAME;
             }
 
@@ -458,11 +525,11 @@ public:
         }
         // 4. ROOM LOBBY Screen Touch (Waiting Room before start)
         else if (state_ == GameState::ROOM_LOBBY) {
-            // START GAME Button (Requires at least 2 players!)
-            float startX = -0.65f, startY = -0.22f, startW = 1.15f, startH = 0.24f;
+            float lobbyCardW = std::min(2.65f, aspect * 1.85f);
+            float startX = 0.0f, startY = -0.40f, startW = 0.90f, startH = 0.18f;
             if (std::abs(normX - startX) <= startW * 0.5f + 0.04f &&
                 std::abs(normY - startY) <= startH * 0.5f + 0.04f) {
-                if (isOwner_ && connectedPlayerCount_ >= 2) {
+                    if (isOwner_ && !roomMatchActive_ && connectedPlayerCount_ >= 2) {
                     if (audioEngine) audioEngine->playCountdownBeep();
                     return TouchAction::START_MULTIPLAYER_GAME;
                 } else {
@@ -471,11 +538,32 @@ public:
                 }
             }
 
+            // Team switch arrows. A player can change teams while waiting in the lobby.
+            float leftX = -lobbyCardW * 0.25f;
+            float rightX = lobbyCardW * 0.25f;
+            float teamBoxW = std::min(1.15f, lobbyCardW * 0.44f);
+            float rowStartY = 0.14f;
+            size_t blueIndex = 0;
+            size_t redIndex = 0;
+            for (const auto& player : currentRoomPlayers_) {
+                bool isRed = player.team == "RED";
+                size_t rowIndex = isRed ? redIndex++ : blueIndex++;
+                float rowY = rowStartY - static_cast<float>(rowIndex) * 0.14f;
+                float arrowX = isRed ? rightX - teamBoxW * 0.5f + 0.10f : leftX + teamBoxW * 0.5f - 0.10f;
+                float arrowY = rowY - 0.005f;
+                if (player.isLocal && !roomMatchActive_ && std::abs(normX - arrowX) <= 0.10f && std::abs(normY - arrowY) <= 0.08f) {
+                    pendingTeam_ = isRed ? "BLUE" : "RED";
+                    if (audioEngine) audioEngine->playCountdownBeep();
+                    return TouchAction::CHANGE_TEAM;
+                }
+            }
+
             // SALIR DE SALA Button (Opens confirm modal)
             float backX = -aspect + 0.28f, backY = -0.82f, backW = 0.38f, backH = 0.12f;
             if (std::abs(normX - backX) <= backW * 0.5f + 0.04f &&
                 std::abs(normY - backY) <= backH * 0.5f + 0.04f) {
                 showLeaveConfirmModal_ = true;
+                leaveModalFromMatch_ = false;
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::NONE;
             }
@@ -585,7 +673,8 @@ public:
         if (state_ == GameState::COUNTDOWN || state_ == GameState::PLAYING || state_ == GameState::MATCH_OVER) {
             renderTopScorePanels(shader, ortho, aspect, redCount, blueCount);
             renderMatchTimerDisplay(shader, ortho);
-            if (state_ == GameState::PLAYING || state_ == GameState::COUNTDOWN) {
+            renderMatchPlayersPanel(shader, ortho, aspect);
+            if (state_ == GameState::PLAYING || state_ == GameState::COUNTDOWN || state_ == GameState::MATCH_OVER) {
                 renderBackButton(shader, ortho, aspect);
             }
         } else {
@@ -778,9 +867,9 @@ private:
 
     void renderRoomLobbyScreen(const Shader& shader, const float* ortho, float aspect) const {
         float cx = 0.0f, cy = -0.03f;
-        float cardW = 2.65f, cardH = 1.25f;
+        float cardW = std::min(2.65f, aspect * 1.85f), cardH = 1.25f;
 
-        // Container card (Expanded +50% across screen)
+        // Container card (Expanded landscape layout)
         drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.08f, 0.11f, 0.18f, 0.94f);
         drawQuad(shader, ortho, cx, cy + cardH * 0.5f, cardW, 0.015f, 0.10f, 0.70f, 1.0f, 0.95f);
         drawQuad(shader, ortho, cx, cy - cardH * 0.5f, cardW, 0.015f, 0.10f, 0.70f, 1.0f, 0.95f);
@@ -790,65 +879,69 @@ private:
         std::string privStr = isPrivateRoom_ ? ("PRIVADA (PIN: " + roomPin_ + ")") : ("PUBLICA");
         drawTextString(shader, ortho, cx, cy + 0.30f, privStr, 0.115f, 0.60f, 0.80f, 1.0f);
 
-        // --- LEFT SIDE COLUMN (STATUS & START BUTTON) ---
-        float leftX = -0.65f;
-        float lBoxW = 1.15f;
+        // --- TEAM COLUMNS (LEFT: BLUE, RIGHT: RED) ---
+        float leftX = -cardW * 0.25f;
+        float rightX = cardW * 0.25f;
+        float teamBoxW = std::min(1.15f, cardW * 0.44f);
+        float teamHeaderY = 0.22f;
+        float rowStartY = 0.14f;
+        float rowH = 0.12f;
 
-        // Connected Players Banner (Count display: e.g. 1/8 or 3/8)
-        float pBoxY = 0.08f, pBoxH = 0.16f;
-        drawQuad(shader, ortho, leftX, pBoxY, lBoxW, pBoxH, 0.12f, 0.16f, 0.24f, 0.92f);
-        drawTextString(shader, ortho, leftX, pBoxY, "JUGADORES: " + std::to_string(connectedPlayerCount_) + "/8", 0.130f, 0.20f, 0.90f, 1.0f);
+        auto renderTeamColumn = [&](const std::string& team, float x, float r, float g, float b) {
+            // The team is identified by its color; the text label is omitted.
+            drawQuad(shader, ortho, x, teamHeaderY, teamBoxW, 0.025f, r, g, b, 0.95f);
 
-        // START GAME Button Rule (Owner vs Non-Owner)
-        float startY = -0.22f, startH = 0.24f;
-        if (isOwner_) {
-            if (connectedPlayerCount_ < 2) {
-                // Disabled state (Red/Dark)
-                drawQuad(shader, ortho, leftX, startY, lBoxW, startH, 0.30f, 0.12f, 0.14f, 0.92f);
-                drawQuad(shader, ortho, leftX, startY - startH * 0.5f, lBoxW, 0.012f, 0.70f, 0.20f, 0.20f, 0.95f);
-                drawTextString(shader, ortho, leftX, startY, Strings::get(StringId::LOBBY_REQUIRED_PLAYERS), 0.115f, 0.95f, 0.40f, 0.40f);
-            } else {
-                // Enabled state (Green/Cyan)
-                drawQuad(shader, ortho, leftX, startY, lBoxW, startH, 0.15f, 0.75f, 0.35f, 0.95f);
-                drawQuad(shader, ortho, leftX, startY - startH * 0.5f, lBoxW, 0.012f, 0.50f, 0.95f, 0.60f, 0.95f);
-                std::string startLabel = Strings::get(StringId::LOBBY_START_MATCH) + " (" + std::to_string(connectedPlayerCount_) + "/8)";
-                drawTextString(shader, ortho, leftX, startY, startLabel, 0.135f, 1.0f, 1.0f, 1.0f);
+            size_t rowIndex = 0;
+            for (const auto& player : currentRoomPlayers_) {
+                if (player.team != team || rowIndex >= 4) continue;
+                float rowY = rowStartY - static_cast<float>(rowIndex) * 0.14f;
+                drawQuad(shader, ortho, x, rowY, teamBoxW, rowH, 0.10f, 0.16f, 0.25f, 0.94f);
+                if (player.isOwner) {
+                    const float border = 0.008f;
+                    drawQuad(shader, ortho, x, rowY + rowH * 0.5f, teamBoxW, border, 1.0f, 0.85f, 0.10f, 1.0f);
+                    drawQuad(shader, ortho, x, rowY - rowH * 0.5f, teamBoxW, border, 1.0f, 0.85f, 0.10f, 1.0f);
+                    drawQuad(shader, ortho, x - teamBoxW * 0.5f, rowY, border, rowH, 1.0f, 0.85f, 0.10f, 1.0f);
+                    drawQuad(shader, ortho, x + teamBoxW * 0.5f, rowY, border, rowH, 1.0f, 0.85f, 0.10f, 1.0f);
+                }
+                drawTextString(shader, ortho, x, rowY, player.name, 0.105f, r, g, b, 1.0f);
+
+                // Only the local player's row is actionable, and only before the match starts.
+                if (player.isLocal && !roomMatchActive_) {
+                    const float arrowX = team == "BLUE" ? x + teamBoxW * 0.5f - 0.10f : x - teamBoxW * 0.5f + 0.10f;
+                    const float arrowY = rowY - 0.005f;
+                    // Each sprite already contains transparent padding and glow;
+                    // render only the arrow without an extra opaque button.
+                    drawCursorSprite(shader, ortho, arrowX, arrowY, team, team == "BLUE");
+                }
+                rowIndex++;
             }
+        };
+
+        renderTeamColumn("BLUE", leftX, 0.20f, 0.75f, 1.0f);
+        renderTeamColumn("RED", rightX, 1.0f, 0.30f, 0.30f);
+
+        // Player count and start control remain centered below the team columns.
+        float countY = -0.13f;
+        drawQuad(shader, ortho, 0.0f, countY, 1.15f, 0.13f, 0.12f, 0.16f, 0.24f, 0.92f);
+        drawTextString(shader, ortho, 0.0f, countY, "JUGADORES: " + std::to_string(connectedPlayerCount_) + "/8", 0.115f, 0.20f, 0.90f, 1.0f);
+
+        float startY = -0.40f, startW = 0.90f, startH = 0.18f;
+        const float requiredW = 1.45f;
+        if (roomMatchActive_) {
+            drawQuad(shader, ortho, 0.0f, startY, startW, startH, 0.12f, 0.18f, 0.28f, 0.92f);
+            drawTextString(shader, ortho, 0.0f, startY, "PARTIDA EN CURSO", 0.105f, 1.0f, 0.75f, 0.20f);
+        } else if (isOwner_ && connectedPlayerCount_ >= 2) {
+            drawQuad(shader, ortho, 0.0f, startY, startW, startH, 0.15f, 0.75f, 0.35f, 0.95f);
+            drawQuad(shader, ortho, 0.0f, startY - startH * 0.5f, startW, 0.012f, 0.50f, 0.95f, 0.60f, 0.95f);
+            drawTextString(shader, ortho, 0.0f, startY,
+                           Strings::get(StringId::LOBBY_START_MATCH) + " (" + std::to_string(connectedPlayerCount_) + "/8)",
+                           0.115f, 1.0f, 1.0f, 1.0f);
+        } else if (isOwner_) {
+            drawQuad(shader, ortho, 0.0f, startY, requiredW, startH, 0.12f, 0.18f, 0.28f, 0.95f);
+            drawTextString(shader, ortho, 0.0f, startY, Strings::get(StringId::LOBBY_REQUIRED_PLAYERS), 0.105f, 1.0f, 0.85f, 0.30f);
         } else {
-            // Non-owner waiting indicator box
-            drawQuad(shader, ortho, leftX, startY, lBoxW, startH, 0.12f, 0.18f, 0.28f, 0.92f);
-            drawQuad(shader, ortho, leftX, startY - startH * 0.5f, lBoxW, 0.012f, 0.20f, 0.70f, 0.95f, 0.95f);
-            drawTextString(shader, ortho, leftX, startY, "ESPERANDO AL CREADOR...", 0.115f, 0.90f, 0.95f, 1.0f);
-        }
-
-        // --- RIGHT SIDE COLUMN (REAL-TIME PLAYERS LIST) ---
-        float rightX = 0.65f;
-        float rTitleY = 0.22f, rBoxW = 1.15f;
-
-        // Title box
-        drawQuad(shader, ortho, rightX, rTitleY, rBoxW, 0.11f, 0.10f, 0.14f, 0.22f, 0.95f);
-        drawTextString(shader, ortho, rightX, rTitleY, "INTEGRANTES DE LA SALA", 0.115f, 0.20f, 0.90f, 1.0f);
-
-        // Render player rows cleanly (No "?" and No "JUGADOR:")
-        float startRowY = 0.08f;
-        size_t maxPlayers = std::min(currentRoomPlayers_.size(), static_cast<size_t>(5));
-        for (size_t i = 0; i < maxPlayers; ++i) {
-            const auto& p = currentRoomPlayers_[i];
-            float rowY = startRowY - static_cast<float>(i) * 0.14f;
-            float rowH = 0.12f;
-
-            if (p.isOwner) {
-                // Highlight Room Owner / Creator with Gold Accent & [CREADOR] tag
-                drawQuad(shader, ortho, rightX, rowY, rBoxW, rowH, 0.38f, 0.28f, 0.05f, 0.92f);
-                drawQuad(shader, ortho, rightX - rBoxW * 0.5f + 0.008f, rowY, 0.016f, rowH, 1.0f, 0.85f, 0.10f, 1.0f);
-                std::string label = "[CREADOR] " + p.name;
-                drawTextString(shader, ortho, rightX, rowY, label, 0.115f, 1.0f, 0.90f, 0.20f);
-            } else {
-                // Regular Connected Player Name
-                drawQuad(shader, ortho, rightX, rowY, rBoxW, rowH, 0.12f, 0.18f, 0.28f, 0.92f);
-                drawQuad(shader, ortho, rightX - rBoxW * 0.5f + 0.008f, rowY, 0.016f, rowH, 0.20f, 0.70f, 1.0f, 1.0f);
-                drawTextString(shader, ortho, rightX, rowY, p.name, 0.115f, 0.80f, 0.90f, 1.0f);
-            }
+            drawQuad(shader, ortho, 0.0f, startY, startW, startH, 0.12f, 0.18f, 0.28f, 0.92f);
+            drawTextString(shader, ortho, 0.0f, startY, "ESPERANDO AL CREADOR...", 0.100f, 0.90f, 0.95f, 1.0f);
         }
 
         // SALIR DE SALA Button (Bottom Left)
@@ -857,7 +950,7 @@ private:
 
     void renderRoomListScreen(const Shader& shader, const float* ortho, float aspect) const {
         float cx = 0.0f, cy = -0.02f;
-        float cardW = 2.45f, cardH = 1.35f;
+        float cardW = std::min(2.45f, aspect * 1.80f), cardH = 1.35f;
 
         // Container card (Expanded landscape layout)
         drawQuad(shader, ortho, cx, cy, cardW, cardH, 0.08f, 0.11f, 0.18f, 0.94f);
@@ -981,7 +1074,7 @@ private:
 
         // 1. Victory / Defeat Status Banner for THIS User
         float statusY = cy + 0.28f;
-        bool isMyTeamBlue = isOwner_; // Creator is Blue, Joiner is Red
+        bool isMyTeamBlue = myTeam_ != "RED";
         bool isBlueWinner = blueCount > redCount;
         bool isRedWinner = redCount > blueCount;
         bool isTie = (redCount == blueCount);
@@ -1079,34 +1172,75 @@ private:
         drawTextString(shader, ortho, banX, banY, msg, 0.115f, 1.0f, 0.85f, 0.20f);
     }
 
+    void renderMatchPlayersPanel(const Shader& shader, const float* ortho, float aspect) const {
+        const float panelW = 0.72f;
+        const float rowH = 0.095f;
+        const float headerH = 0.105f;
+        const float startY = 0.53f;
+        const float leftX = -aspect + panelW * 0.5f + 0.06f;
+        const float rightX = aspect - panelW * 0.5f - 0.06f;
+
+        auto drawTeamPanel = [&](const std::string& team, float x, float r, float g, float b) {
+            // The colored strip and cubes identify the team without a text label.
+            drawQuad(shader, ortho, x, startY, panelW, 0.025f, r, g, b, 0.95f);
+
+            size_t rowIndex = 0;
+            for (const auto& player : currentRoomPlayers_) {
+                if (player.team != team || rowIndex >= 4) continue;
+                float rowY = startY - headerH * 0.5f - rowH * 0.75f - static_cast<float>(rowIndex) * rowH;
+                drawQuad(shader, ortho, x, rowY, panelW, rowH, 0.08f, 0.14f, 0.22f, 0.90f);
+                if (player.isOwner) {
+                    const float border = 0.006f;
+                    drawQuad(shader, ortho, x, rowY + rowH * 0.5f, panelW, border, 1.0f, 0.85f, 0.10f, 1.0f);
+                    drawQuad(shader, ortho, x, rowY - rowH * 0.5f, panelW, border, 1.0f, 0.85f, 0.10f, 1.0f);
+                    drawQuad(shader, ortho, x - panelW * 0.5f, rowY, border, rowH, 1.0f, 0.85f, 0.10f, 1.0f);
+                    drawQuad(shader, ortho, x + panelW * 0.5f, rowY, border, rowH, 1.0f, 0.85f, 0.10f, 1.0f);
+                }
+                drawTextString(shader, ortho, x, rowY, player.name, 0.078f, r, g, b, 1.0f);
+                rowIndex++;
+            }
+        };
+
+        const bool localTeamIsRed = myTeam_ == "RED";
+        const std::string localTeam = localTeamIsRed ? "RED" : "BLUE";
+        const std::string opponentTeam = localTeamIsRed ? "BLUE" : "RED";
+        drawTeamPanel(localTeam, leftX,
+                      localTeamIsRed ? 1.0f : 0.20f,
+                      localTeamIsRed ? 0.30f : 0.75f,
+                      localTeamIsRed ? 0.30f : 1.0f);
+        drawTeamPanel(opponentTeam, rightX,
+                      localTeamIsRed ? 0.20f : 1.0f,
+                      localTeamIsRed ? 0.75f : 0.30f,
+                      localTeamIsRed ? 1.0f : 0.30f);
+    }
+
     void renderTopScorePanels(const Shader& shader, const float* ortho, float aspect, int redCount, int blueCount) const {
         float panelY = 0.85f;
         float panelW = 0.52f;
         float panelH = 0.16f;
 
-        // Top-Left Panel (RED Score)
-        float redX = -aspect + panelW * 0.5f + 0.06f;
-        drawQuad(shader, ortho, redX, panelY, panelW, panelH, 0.12f, 0.15f, 0.22f, 0.92f);
-        drawQuad(shader, ortho, redX, panelY - panelH * 0.5f, panelW, 0.01f, 1.0f, 0.22f, 0.22f, 0.95f);
-        draw3DMiniCube(shader, ortho, redX - panelW * 0.30f, panelY, 1.0f, 0.22f, 0.22f);
-        drawDigits(shader, ortho, redX + 0.04f, panelY, redCount, 1.0f, 0.35f, 0.35f);
+        const bool localTeamIsRed = myTeam_ == "RED";
+        const int localScore = localTeamIsRed ? redCount : blueCount;
+        const int opponentScore = localTeamIsRed ? blueCount : redCount;
+        const float localR = localTeamIsRed ? 1.0f : 0.05f;
+        const float localG = localTeamIsRed ? 0.22f : 0.55f;
+        const float localB = localTeamIsRed ? 0.22f : 1.0f;
+        const float opponentR = localTeamIsRed ? 0.05f : 1.0f;
+        const float opponentG = localTeamIsRed ? 0.55f : 0.22f;
+        const float opponentB = localTeamIsRed ? 1.0f : 0.22f;
 
-        // Reset Button (Left side, directly below RED Score Panel)
-        float resetX = -aspect + 0.28f;
-        float resetY = 0.65f;
-        float resetW = 0.38f;
-        float resetH = 0.14f;
+        // The local player's team is always shown on the left.
+        float localX = -aspect + panelW * 0.5f + 0.06f;
+        drawQuad(shader, ortho, localX, panelY, panelW, panelH, 0.12f, 0.15f, 0.22f, 0.92f);
+        drawQuad(shader, ortho, localX, panelY - panelH * 0.5f, panelW, 0.01f, localR, localG, localB, 0.95f);
+        draw3DMiniCube(shader, ortho, localX - panelW * 0.30f, panelY, localR, localG, localB);
+        drawDigits(shader, ortho, localX + 0.04f, panelY, localScore, localR, localG, localB);
 
-        drawQuad(shader, ortho, resetX, resetY, resetW, resetH, 0.14f, 0.18f, 0.25f, 0.92f);
-        drawQuad(shader, ortho, resetX, resetY - resetH * 0.5f, resetW, 0.01f, 0.4f, 0.7f, 1.0f, 0.95f);
-        drawTextString(shader, ortho, resetX, resetY, Strings::get(StringId::EXIT), 0.110f, 0.9f, 0.95f, 1.0f);
-
-        // Top-Right Panel (BLUE Score)
-        float blueX = aspect - panelW * 0.5f - 0.06f;
-        drawQuad(shader, ortho, blueX, panelY, panelW, panelH, 0.12f, 0.15f, 0.22f, 0.92f);
-        drawQuad(shader, ortho, blueX, panelY - panelH * 0.5f, panelW, 0.01f, 0.05f, 0.55f, 1.0f, 0.95f);
-        draw3DMiniCube(shader, ortho, blueX - panelW * 0.30f, panelY, 0.05f, 0.55f, 1.0f);
-        drawDigits(shader, ortho, blueX + 0.04f, panelY, blueCount, 0.25f, 0.68f, 1.0f);
+        float opponentX = aspect - panelW * 0.5f - 0.06f;
+        drawQuad(shader, ortho, opponentX, panelY, panelW, panelH, 0.12f, 0.15f, 0.22f, 0.92f);
+        drawQuad(shader, ortho, opponentX, panelY - panelH * 0.5f, panelW, 0.01f, opponentR, opponentG, opponentB, 0.95f);
+        draw3DMiniCube(shader, ortho, opponentX - panelW * 0.30f, panelY, opponentR, opponentG, opponentB);
+        drawDigits(shader, ortho, opponentX + 0.04f, panelY, opponentScore, opponentR, opponentG, opponentB);
     }
 
     void drawTextString(const Shader& shader, const float* ortho, float cx, float cy, const std::string& text,
@@ -1188,6 +1322,40 @@ private:
             quadIndices_.data(),
             quadIndices_.size()
         );
+    }
+
+    void drawCursorSprite(const Shader& shader, const float* ortho, float x, float y,
+                          const std::string& team, bool pointsRight) const {
+        const std::shared_ptr<TextureAsset>& texture = team == "BLUE"
+                ? (pointsRight ? arrowBlueRightTexture_ : arrowBlueLeftTexture_)
+                : (pointsRight ? arrowRedRightTexture_ : arrowRedLeftTexture_);
+        if (!texture) return;
+
+        const float w = 0.18f;
+        const float h = 0.125f;
+
+        float model[16];
+        MatrixMath::identity(model);
+        MatrixMath::translate(model, x, y, 0.0f);
+        MatrixMath::scale(model, w * 0.5f, h * 0.5f, 1.0f);
+
+        float mvp[16];
+        MatrixMath::multiply(mvp, ortho, model);
+        shader.setProjectionMatrix(mvp);
+        shader.setColor(1.0f, 1.0f, 1.0f, 1.0f);
+        shader.setUseTexture(true);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, texture->getTextureID());
+
+        const Vertex vertices[] = {
+            Vertex(Vector3{-1.0f,  1.0f, 0.0f}, Vector2{0.0f, 1.0f}),
+            Vertex(Vector3{ 1.0f,  1.0f, 0.0f}, Vector2{1.0f, 1.0f}),
+            Vertex(Vector3{ 1.0f, -1.0f, 0.0f}, Vector2{1.0f, 0.0f}),
+            Vertex(Vector3{-1.0f, -1.0f, 0.0f}, Vector2{0.0f, 0.0f})
+        };
+        static const uint16_t indices[] = {0, 1, 2, 0, 2, 3};
+        shader.drawIndexed(vertices, sizeof(Vertex), 0, sizeof(Vector3), indices, 6);
+        shader.setUseTexture(false);
     }
 
     void drawSingleDigit(const Shader& shader, const float* ortho, float x, float y, int digit, float size,
@@ -1294,8 +1462,17 @@ private:
     std::string joinNotificationText_;
     float joinNotificationTimer_;
     bool showLeaveConfirmModal_;
+    bool leaveModalFromMatch_;
+    bool returnedToRoomFromMatch_;
+    bool roomMatchActive_;
+    std::string pendingTeam_;
+    std::string myTeam_;
     float reconnectTimer_;
     FontRenderer fontRenderer_;
+    std::shared_ptr<TextureAsset> arrowRedLeftTexture_;
+    std::shared_ptr<TextureAsset> arrowBlueLeftTexture_;
+    std::shared_ptr<TextureAsset> arrowBlueRightTexture_;
+    std::shared_ptr<TextureAsset> arrowRedRightTexture_;
 
     std::vector<Vertex> quadVertices_;
     std::vector<uint16_t> quadIndices_;
