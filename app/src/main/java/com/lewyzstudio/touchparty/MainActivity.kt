@@ -222,6 +222,7 @@ class MainActivity : GameActivity() {
         }
     }
 
+    //only send nickname
     private fun sendSavedNicknameToNative(nick: String) {
         Thread {
             var retries = 0

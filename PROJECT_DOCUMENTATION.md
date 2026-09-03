@@ -109,6 +109,8 @@ Servidor Node.js Backend:
 - **Active Server Heartbeat & Ghost Room Audit (`cleanGhostRooms`)**:
   - Ping/pong activo cada 5s en Node.js.
   - Detecta sockets muertos/cerrados, remueve jugadores desconectados, reasigna `ownerId` al primer integrante activo o destruye salas vacías.
+  - **Ventana de reconexión de 60s (`DISCONNECT_RECONNECT_GRACE_MS`)**: un jugador que cae durante `PLAYING` se conserva en `disconnectedPlayers` hasta 60s para permitir la reconexión automática de su dispositivo; al expirar el lapso, `purgeExpiredDisconnected()` libera su asiento y sus cubos vuelven a neutro.
+  - **Fin de partida sin salas fantasma**: `endGame()` libera el pool de desconectados justo después de emitir `game_over` (la reconexión solo aplica en `PLAYING`), de modo que una sala terminada sin jugadores conectados se destruye y su nombre (p. ej. el default `Lobby`) queda disponible de nuevo.
 - **Local NickName Persistence**: Stored in `SharedPreferences` (`"user_nickname"`). Prompted ONLY on first launch. Sent to C++ via thread-safe JNI retry loop.
 - **WebSocket Protocol**:
   - `list_rooms` -> `rooms_list`: Populates `serverRooms_` vector dynamically in C++.
@@ -221,6 +223,54 @@ Las siguientes palabras son convenciones permanentes del proyecto. No son comand
 - **`Testeado`**: significa que el usuario validó el último cambio. El agente debe localizar la última entrada con estado `Pendiente de prueba`, registrar la hora de confirmación en `America/Guatemala` y cambiar su estado a `Testeado`.
 
 Si el usuario necesita confirmar todos los cambios pendientes, puede escribir **`Rcommit todo`**. En ese caso, el agente debe mostrar primero el alcance de los archivos que serán incluidos y solicitar confirmación si existen cambios ajenos o ambiguos.
+
+### 5.3. Acceso SSH al VPS para agentes IA (habilitado 2026-09-02)
+
+> [!IMPORTANT]
+> **Contexto de trabajo del usuario**: el usuario usa **dos terminales** — una terminal **local (Mac)** para subir archivos (`scp`) y verificar (`curl`), y una segunda terminal **conectada por SSH al servidor** para ejecutar pruebas y reiniciar Docker. Cuando un agente IA necesite desplegar, debe seguir este mismo esquema (comandos locales + comando remoto vía `ssh`), no reemplazar el servidor.
+
+Datos de acceso (ya configurados y verificados el 2026-09-02):
+
+- **Servidor**: `admin@144.126.151.225` (hostname VPS: `vmi3019967`; dominio público: `https://game.tutaxi502.com`).
+- **Autenticación**: clave pública dedicada de despliegue en `/Users/lewyz/.ssh/id_ed25519_touchparty` (SIN passphrase, para uso no interactivo de agentes), ya autorizada en `/home/admin/.ssh/authorized_keys` del VPS (el servidor responde `Server accepts key`).
+- **Clave dedicada (agentes)**: en `/Users/lewyz/.ssh/config` está definido el alias **`game-server`** (`HostName 144.126.151.225`, `User admin`, `IdentityFile ~/.ssh/id_ed25519_touchparty`, `IdentitiesOnly yes`). Usar siempre el alias `game-server` en `scp`/`ssh`; no requiere passphrase ni ssh-agent. La clave antigua `~/.ssh/id_ed25519` quedó con passphrase desconocida y NO debe usarse para despliegues automáticos.
+
+
+- **Comprobación de conectividad** (terminal local del agente):
+
+```bash
+ssh -o BatchMode=yes -o ConnectTimeout=15 game-server 'echo SSH_OK && hostname'
+# Esperado: SSH_OK y vmi3019967
+```
+- **Estado del servicio** (verificación rápida desde cualquier terminal):
+
+```bash
+curl -sS -m 15 https://game.tutaxi502.com/health
+# Esperado: {"status":"ok","uptime":...,"activeRooms":0}
+```
+
+**Flujo de despliegue autoritativo que deben usar los agentes IA** (misma estructura que la Guía de Despliegue de abajo):
+
+1. **Terminal local (Mac) — subir archivos**:
+
+```bash
+scp /Users/lewyz/Downloads/home/admin/game-server/{game.js,index.js,test.js,package.json} game-server:/home/admin/game-server/
+```
+
+2. **Comando remoto (un solo `ssh`) — pruebas + copia + reinicio SOLO de game-server** (no detiene los demás servicios):
+
+```bash
+ssh game-server 'cd /home/admin/game-server && npm test && sudo cp /home/admin/game-server/{game.js,index.js,test.js,package.json} /home/deployer/supabase/docker/game-server/ && sudo docker compose -f /home/deployer/supabase/docker/docker-compose.yml stop game-server && sudo docker compose -f /home/deployer/supabase/docker/docker-compose.yml up -d --build game-server'
+```
+
+3. **Terminal local — verificación**:
+
+```bash
+curl https://game.tutaxi502.com/health
+```
+
+> [!NOTE]
+> **`sudo` sin contraseña ya configurado (2026-09-02)**: en `/etc/sudoers` del VPS está autorizado `admin ALL=(root) NOPASSWD: /usr/bin/docker, /usr/bin/cp`. Por ello el comando remoto del paso 2 corre sin pedir contraseña en sesión no interactiva. Si en el futuro se restringe, revisar `sudo -l | grep -A3 "User admin"`.
 
 ### Guía de Despliegue del Servidor (Incluir SOLO cuando se modifique el servidor Node.js):
 
