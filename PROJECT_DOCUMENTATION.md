@@ -33,7 +33,20 @@ app/src/main/
 │   ├── MatrixMath.h          # Column-major 4x4 matrix math & 3D unprojection raycast algorithms
 │   ├── CubeGrid.h            # 12x10 3D cube grid (120 cubes), 3D floor platform, animations & real-time sync
 │   ├── ParticleSystem.h      # Board-relative expanding shockwave particle system
-│   ├── GameUI.h              # 2D Orthographic UI (NickName badge, server status, room list, confirmation modal)
+│   ├── GameUI.h              # 2D Orthographic UI state coordinator (state container & navigation router)
+│   ├── GameUIStructs.h       # Shared UI data structures (ServerRoomEntry, PlayerInfo)
+│   ├── UITheme.h             # Centralized UI Theme & Color Palette Manager (Light/Dark themes, ColorRGBA)
+│   ├── UIButton.h            # Reusable C++ UI Button & Banner Component (rendering, borders, auto-fitting, touch hitbox)
+│   ├── UICard.h              # Reusable C++ UI Container Card & Panel Component (borders, background, titles, underlines)
+│   ├── UIBanner.h            # Reusable Top/Bottom Banners (Server status, NickName badge, notifications)
+│   ├── UIDrawHelpers.h       # Primitive 2D rendering helpers (quads, textures, icons, digits, back button)
+│   ├── UISetupScreen.h       # Composable Screen: First-run setup & language initialization
+│   ├── UIWelcomeScreen.h     # Composable Screen: Main menu screen (Title card, Search, Create room, Test 1v1, Settings)
+│   ├── UIRoomListScreen.h    # Composable Screen: Available rooms screen (Filters, scrollable rows, Join/Refresh)
+│   ├── UICreateRoomScreen.h   # Composable Screen: Create room screen (Name, privacy toggle, PIN field)
+│   ├── UIRoomLobbyScreen.h   # Composable Screen: Expanded Room Lobby screen (Blue/Red team columns, player rows, arrows)
+│   ├── UILanguageScreen.h    # Composable Screen: Modal language selection panel (Flag buttons ES/EN)
+│   ├── UIInGameOverlay.h     # Composable Screen: HUD overlay (Match timer, score panels, winner banner, leave confirm modal)
 │   ├── AudioEngine.h         # Procedural AAudio PCM synth & JNI MP3 trigger
 │   ├── VibrationEngine.h     # JNI bridge for device haptic feedback
 │   ├── Shader.h / .cpp       # GLES 3.0 shader program management (MVP, Color, Texture)
@@ -79,29 +92,25 @@ Servidor Node.js Backend:
 - **Real-Time Synchronized State**: `setCubeState(col, row, newState)` updates cell state instantly upon receiving WebSocket `room_state` board updates from Node.js server.
 - **Rotation-Aware Raycasting**: 100% picking precision at any rotation angle during half-time board rotation.
 
-### 3.3. User Interface & Overlay (`GameUI.h`)
-- **Server Status Banner**: Displays `SERVIDOR: CONECTADO` (green) or `SERVIDOR: DESCONECTADO (MODO LOCAL)` (red).
-- **Top-Right Registered NickName Badge**: Rendered in a crisp white background box (`1.0, 1.0, 1.0, 1.0`) with dark text and blue accent border. Non-editable once saved.
-- **Redesigned Room List (`renderRoomListScreen`)**:
-  - Title: `SALAS DISPONIBLES`.
-  - Filter Selector: `BUSCAR: TODAS` / `PUBLICAS` / `PRIVADAS` (sin acentos para compatibilidad de fuente).
-  - Displays visible room rows with player count (e.g. `room-name (1/8)`).
-  - **Salas Públicas**: Texto en cian brillante (`#33E6FF`) con botón `[UNIRSE]`.
-  - **Salas Privadas**: Texto en naranja brillante (`#FF8C1A`) con botón `[PIN]`.
-  - Deduplicación estricta por `entry.id` para evitar filas duplicadas.
-- **Redesigned Expanded Lobby Screen (`renderRoomLobbyScreen`)**:
-  - Escala ampliada (+50%) abarcando la pantalla landscape (`cardW = 2.65f`, `cardH = 1.25f`).
-  - **Equipo azul a la izquierda y equipo rojo a la derecha**: cada jugador aparece en su columna según el equipo autoritativo recibido del servidor.
-  - El creador conserva el resaltado dorado `[CREADOR]`; su resaltado no impide que pueda cambiar de equipo.
-  - Cada jugador puede pulsar la flecha de su propia fila para cambiar entre `BLUE` y `RED` mientras la sala está en lobby.
-  - El conteo y la lista se actualizan en tiempo real; los jugadores desconectados temporalmente durante una partida no se muestran como conectados.
-  - En el lobby, el panel de conteo queda elevado y ampliado; el aviso de jugadores requeridos usa un panel más ancho y contraste claro para no mezclar texto rojo con fondo rojo.
-  - El botón de inicio solo está disponible para el propietario cuando hay al menos dos jugadores y no hay una partida activa.
-  - El cambio de equipo usa sprites individuales (`arrow_red_left.png`, `arrow_blue_left.png`, `arrow_blue_right.png`, `arrow_red_right.png`) y conserva su transparencia y brillo originales.
-- **Confirmation Exit Modal (`renderLeaveConfirmModal`)**:
-  - Displays `"¿DESEAS SALIR DE LA SALA?"` modal card when tapping "SALIR DE SALA" or "VOLVER" in lobby.
-  - `[SÍ, SALIR]` sends WebSocket `leave` to server, destroys room if empty, and returns to main menu.
-  - `[CANCELAR]` closes modal.
+### 3.3. User Interface & Overlay Architecture (Arquitectura Modular Estilo Jetpack Compose)
+- **Coordinador de UI (`GameUI.h`)**: Contenedor principal de estado (State Container) que gestiona temporizadores, transiciones de estado y callbacks JNI/WebSocket, delegando el renderizado a clases de pantalla independientes.
+- **Estructuras Compartidas (`GameUIStructs.h`)**: Define las estructuras de datos `ServerRoomEntry` y `PlayerInfo` utilizadas a lo largo de los componentes de la UI.
+- **Sistema Centralizado de Temas (`UITheme.h`)**:
+  - Encapsula toda la paleta de colores (`ColorRGBA`) con soporte para temas `LIGHT` y `DARK`.
+  - **Prohibición de valores RGB hardcodeados**: Todos los colores de la interfaz deben declararse en `UITheme.h` (`BADGE_*`, `TEAM_ROW_*`, `CARD_*`, `BTN_SUCCESS_*`, `BTN_PRIMARY_*`, `BTN_TEST_*`, `SERVER_*`).
+- **Componentes Primitivos Reutilizables**:
+  - **Botones y Banners (`UIButton.h`)**: Estandariza el renderizado de botones y banners interactivos con `UIButtonSpec`, bordes de acento y tipografía auto-ajustada (`FontRenderer`). Propiedad `isClickable = false` para elementos estáticos.
+  - **Tarjetas Contenedoras (`UICard.h`)**: Paneles contenedores con bordes, color de fondo y título de encabezado con subrayado decorativo (`UICardSpec`).
+  - **Banners de Estado (`UIBanner.h`)**: Banners de conexión del servidor, Badge de NickName en la esquina superior derecha y notificaciones emergentes de ingreso/salida de jugadores.
+  - **Ayudantes de Dibujo (`UIDrawHelpers.h`)**: Primitivas de renderizado de bajo nivel (`drawQuad`, `drawIcon`, `drawCursorSprite`, `drawTextFitted`, `renderBackButton`).
+- **Clases de Pantalla Independientes (Composables)**:
+  - **Pantalla Principal (`UIWelcomeScreen.h`)**: Menú principal con tarjeta de título `"TOUCHPARTY CUBE ARENA"`, botón `"TEST 1V1"`, engranaje de configuración e idioma y botones `"BUSCAR SALAS"` y `"CREAR SALA"`.
+  - **Pantalla de Salas Disponibles (`UIRoomListScreen.h`)**: Muestra la lista de salas filtrables (`BUSCAR: TODAS` / `PUBLICAS` / `PRIVADAS`), scroll con botones `UP ^` / `DWN v`, y botones de acción `[UNIRSE]`, `[PIN]` y `[ACTUALIZAR]`.
+  - **Pantalla de Crear Sala (`UICreateRoomScreen.h`)**: Formulario para crear salas públicas o privadas, nombre de sala, toggle de privacidad, PIN de acceso y botón `"CREAR SALA"`.
+  - **Pantalla de Lobby de Sala (`UIRoomLobbyScreen.h`)**: Vista expandida (+50% de escala) con columnas separadas para el equipo Azul y Rojo, filas de jugadores con resaltado de propietario, cursores de cambio de equipo (`arrow_*`) y botón de inicio.
+  - **Panel de Selección de Idioma (`UILanguageScreen.h`)**: Diálogo modal con banderas de España e Inglés (EE.UU.) para cambio inmediato de idioma.
+  - **Overlays y HUD de Partida (`UIInGameOverlay.h`)**: Marcadores superiores, temporizador (`01:30`), cuadro de jugadores en partida, banner de victoria/derrota, modal de confirmación de salida (`"¿DESEAS SALIR DE LA SALA?"`) y conteo regresivo (`3, 2, 1, GO!`).
+  - **Pantalla de Primer Arranque (`UISetupScreen.h`)**: Pantalla inicial de bienvenida e ingreso de nickname.
 
 ### 3.4. Networking & Real-Time Sync (`GameWebSocketManager.kt`, `MainActivity.kt`, `index.js`)
 - **Server Health Check**: Background HTTP GET to `${BuildConfig.GAME_SERVER_HTTP_URL}/health` every 5s.
@@ -112,6 +121,14 @@ Servidor Node.js Backend:
   - **Ventana de reconexión de 60s (`DISCONNECT_RECONNECT_GRACE_MS`)**: un jugador que cae durante `PLAYING` se conserva en `disconnectedPlayers` hasta 60s para permitir la reconexión automática de su dispositivo; al expirar el lapso, `purgeExpiredDisconnected()` libera su asiento y sus cubos vuelven a neutro.
   - **Fin de partida sin salas fantasma**: `endGame()` libera el pool de desconectados justo después de emitir `game_over` (la reconexión solo aplica en `PLAYING`), de modo que una sala terminada sin jugadores conectados se destruye y su nombre (p. ej. el default `Lobby`) queda disponible de nuevo.
 - **Local NickName Persistence**: Stored in `SharedPreferences` (`"user_nickname"`). Prompted ONLY on first launch. Sent to C++ via thread-safe JNI retry loop.
+- **Multilingüe EN/ES (CHG-018)**: el juego soporta Español e Inglés.
+  - **Detección del idioma del sistema**: `MainActivity` lee `Locale.getDefault()` (es → español; cualquier otro → inglés) y lo envía a C++ vía `nativeSetLanguage` antes de renderizar.
+  - **Persistencia local**: `SharedPreferences` clave `"app_language"` (`"es"`/`"en"`), guardada al confirmar el NickName en la pantalla de primer arranque y al cambiar idioma desde el engranaje.
+  - **Pantalla de primer arranque (`GameState::SETUP`)**: muestra título, banderas de idioma (ES `flag_es.png`, EN `flag_us.png`), campo de NickName (teclado nativo) y botón `GUARDAR Y CONTINUAR`. Solo aparece si no hay nickname guardado.
+  - **Selector desde el menú (engranaje)**: icono `gear_icon.png` debajo del botón `TEST 1V1` en la pantalla principal abre el panel `renderLanguagePanel`; al elegir bandera el idioma cambia al instante (los textos se leen en cada frame vía `Strings::get`) y se persiste.
+  - **Catálogo centralizado**: `Strings.h` enumera todos los StringId con pares ES/EN; los textos hardcodeados de `GameUI.h` se migraron a `Strings::get`. Los diálogos nativos de Android usan `res/values/strings.xml` (EN) y `res/values-es/strings.xml` (ES).
+  - **Fuente con tildes**: se reemplazó `calculator.ttf` por **Press Start 2P** (`press_start_2p.ttf`, licencia SIL OFL 1.1 en `assets/OFL-press_start_2p.txt`), que rasteriza correctamente los acentos españoles (Á É Í Ó Ú Ü Ñ á é í ó ú ü ñ ¡ ¿). `FontRenderer` ya soporta UTF-8/Latin-1; el fallback sin tildes ya no se activa.
+  - **UI profesional (auto-ajuste)**: el font píxel Press Start 2P es más ancho que el anterior, por lo que se añadió `drawTextFitted` que mide el ancho del texto y reduce el tamaño para que **nunca desborde su contenedor**. Se rediseñaron las pantallas (menú, crear sala, salas disponibles, lobby, setup, panel de idioma, modal de salir, winner overlay, banners) con tamaños coherentes, separación vertical, subrayados de acento y sin colisiones de texto.
 - **WebSocket Protocol**:
   - `list_rooms` -> `rooms_list`: Populates `serverRooms_` vector dynamically in C++.
   - `join` -> `joined` / `room_state`: Joins room, assigns stable player ID, team (`BLUE`/`RED`) and team color.
@@ -174,28 +191,35 @@ Servidor Node.js Backend:
 > 2. **INSTRUCCIONES DE DESPLIEGUE DEL SERVIDOR**: Las instrucciones de despliegue del VPS ÚNICAMENTE se deben incluir en el resumen final **SI Y SOLO SI se realizaron modificaciones en los archivos del servidor Node.js** (`/Users/lewyz/Downloads/home/admin/game-server/`).
 > 3. Si **NO** se modificaron archivos del servidor (por ejemplo, si solo se cambió código en Android / C++ / Kotlin), **NO DEBES incluir** la Guía de Despliegue del Servidor en tu respuesta final para evitar confusiones.
 > 4. La respuesta final DEBE incluir una sección breve y concreta de comprobación, con los comandos de prueba, compilación o pasos manuales necesarios según el tipo de cambio.
+> 5. **REGLAS MANDATORIAS PARA DESARROLLO DE UI Y COMPONENTES EN C++**:
+>    - **Gestor de Colores (`UITheme.h`)**: Todos los agentes de IA DEBEN usar `UITheme.h` para obtener colores (`ColorRGBA`). Queda estrictamente prohibido hardcodear valores RGB (`1.0f, 0.5f, ...`) en `GameUI.h`.
+>    - **Componente Reutilizable de Botones (`UIButton.h`)**: Todo botón o banner estático DEBE renderizarse usando `UIButtonSpec` y la función `UIButton::render()`. Para componentes estáticos sin respuesta táctil, establecer `isClickable = false`.
+>    - **Prohibido el texto recortado con puntos suspensivos ("...")**: NUNCA permitir que títulos o textos de botones se muestren truncados (`"TE..."`, `"SEAR..."`, `"CREA..."`). Si un texto se trunca, el agente DEBE ampliar el contenedor (`cardW`, `btnW`, `w`) o ajustar el tamaño de fuente (`fontSize`).
+>    - **Ajuste de Tipografía y Márgenes**: Asegurar que las tarjetas y badges tengan altura (`h`) y holgura suficiente para que los textos queden verticalmente centrados sin cortar los bordes superior o inferior.
 
-### 5.1. Historial obligatorio de cambios para agentes IA
+### 5.1. Historial obligatorio de cambios por día para agentes IA
 
-Todos los agentes IA deben mantener un historial cronológico de cada cambio realizado en:
+Todos los agentes IA deben registrar y mantener el historial cronológico de cada cambio organizado **por archivos diarios independientes** dentro del directorio `history/`:
 
-`/Users/lewyz/Documents/ProyectsEnero2026.nosync/AgostoGames/PROJECT_CHANGE_HISTORY.md`
+- **Formato y Ruta de archivo diario**: `/Users/lewyz/Documents/ProyectsEnero2026.nosync/AgostoGames/history/MES_DIA_DD_AÑO.md` (por ejemplo: `history/SEPTIEMBRE_MARTES_01_2026.md`, `history/SEPTIEMBRE_MIERCOLES_02_2026.md`, `history/SEPTIEMBRE_JUEVES_03_2026.md`).
 
-El historial debe conservarse como un archivo Markdown separado de esta documentación técnica y debe incluir, como mínimo, una entrada por cambio con los siguientes datos:
+Cada entrada en el archivo diario del día correspondiente debe incluir los siguientes datos por cambio:
 
-- **ID del cambio**: identificador consecutivo o único.
-- **Prompt solicitado**: solicitud original del usuario, o un resumen fiel si es demasiado extensa.
+- **ID del cambio**: identificador consecutivo (ej. `CHG-001`, `CHG-029`).
+- **Prompt solicitado**: solicitud original del usuario.
 - **Hora de inicio**: momento en que el usuario solicita el cambio.
-- **Hora de entrega**: momento en que el agente devuelve el resultado del cambio.
+- **Hora de entrega**: momento en que el agente entrega la implementación.
 - **Duración de implementación**: tiempo transcurrido entre inicio y entrega.
-- **Archivos modificados**: rutas de todos los archivos afectados, incluyendo archivos del backend si aplica.
-- **Verificación realizada**: pruebas, compilación y/o validaciones ejecutadas.
-- **Estado**: `Pendiente de prueba` hasta que el usuario confirme.
-- **Hora de prueba final**: momento en que el usuario escribe exactamente `Testeado`.
+- **Archivos modificados**: rutas de todos los archivos afectados.
+- **Verificación realizada**: pruebas y compilación ejecutadas.
+- **Estado**: `Pendiente de prueba` hasta que el usuario confirme con `Testeado`.
+- **Hora de prueba final**: momento en que el usuario responde `Testeado`.
 
-Las horas deben registrarse en formato ISO 8601 usando la zona horaria local del proyecto (`America/Guatemala`, UTC-06:00), por ejemplo: `2026-09-01 19:48:00 -06:00`.
-
-Cuando el usuario escriba `Testeado`, el agente debe localizar el último cambio con estado `Pendiente de prueba`, agregar la hora de esa confirmación y cambiar su estado a `Testeado`. No se debe marcar un cambio como testeado antes de recibir esa confirmación explícita.
+> [!IMPORTANT]
+> **ZONA HORARIA Y MEDICIÓN DE TIEMPO Y PRODUCTIVIDAD ("Testeado")**:
+> 1. **Zona Horaria Oficial**: Todos los registros de hora (`Inicio`, `Entrega`, `Hora de prueba final`) DEBEN registrarse siempre en la **zona horaria de Guatemala** (`America/Guatemala`, UTC-06:00), por ejemplo: `2026-09-03 02:31:00 -06:00`.
+> 2. **Confirmación con `Testeado`**: Cuando el usuario responde **`Testeado`**, significa que el cambio fue verificado y **solucionado exitosamente**. La duración total del ciclo de un cambio/tarea abarca desde la hora de inicio de la solicitud hasta la hora en que se recibe la respuesta `Testeado`.
+> 3. Al recibir `Testeado`, el agente debe actualizar la hora de prueba final y marcar el estado como `Testeado` en el archivo diario del día correspondiente (`history/MES_DIA_DD_AÑO.md`).
 
 Formato recomendado:
 

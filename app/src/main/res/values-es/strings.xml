@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">touchparty</string>
+    <string name="btn_accept">ACEPTAR</string>
+    <string name="btn_cancel">CANCELAR</string>
+    <string name="toast_welcome_back">¡Bienvenido de nuevo, %1$s!</string>
+</resources>

@@ -43,7 +43,43 @@ enum class StringId {
     JOIN_NOTIFICATION_SUFFIX,
     PROMPT_ENTER_NICKNAME,
     PROMPT_ROOM_NAME,
-    PROMPT_ROOM_PIN
+    PROMPT_ROOM_PIN,
+    LANGUAGE_LABEL,
+    LANGUAGE_SPANISH,
+    LANGUAGE_ENGLISH,
+    LANGUAGE_SELECT,
+    SAVE_CONTINUE,
+    WELCOME_BACK,
+    NICKNAME_TAP_HINT,
+    WELCOME_SETUP_TITLE,
+    PLAYER_JOINED,
+    PLAYER_LEFT,
+    NOW_OWNER,
+    MATCH_OVER_REASON,
+    TYPE_LABEL,
+    PUBLIC_LABEL,
+    PRIVATE_LABEL,
+    PIN_LABEL,
+    PIN_MASK,
+    PLAYERS_COUNT,
+    MATCH_IN_PROGRESS,
+    WAITING_CREATOR,
+    WAITING_LEADER,
+    RECONNECTING,
+    YOU_WON,
+    YOU_LOST,
+    TIE_GAME,
+    SETTINGS,
+    REQUIRED_2_PLAYERS,
+    LEAVE_CONFIRM_QUESTION,
+    YES_LEAVE,
+    CANCEL,
+    WELCOME_BACK_NOTIF,
+    PLAYER_JOINED_NOTIF,
+    SEARCH_PREFIX,
+    PRIVATE_WITH_PIN,
+    PIN_LABEL_WORD,
+    PRIVATE_ROOM_PIN_PROMPT
 };
 
 class Strings {
@@ -131,7 +167,79 @@ public:
             case StringId::PROMPT_ROOM_NAME:
                 return (lang == Language::SPANISH) ? "NOMBRE DE LA SALA" : "ROOM NAME";
             case StringId::PROMPT_ROOM_PIN:
-                return (lang == Language::SPANISH) ? "PIN DE LA SALA (4 DÍGITOS)" : "ROOM PIN (4 DIGITS)";
+                return (lang == Language::SPANISH) ? "PIN DE LA SALA (4 DIGITOS)" : "ROOM PIN (4 DIGITS)";
+            case StringId::LANGUAGE_LABEL:
+                return (lang == Language::SPANISH) ? "IDIOMA:" : "LANGUAGE:";
+            case StringId::LANGUAGE_SPANISH:
+                return "SPANISH";
+            case StringId::LANGUAGE_ENGLISH:
+                return "ENGLISH";
+            case StringId::LANGUAGE_SELECT:
+                return (lang == Language::SPANISH) ? "SELECCIONA TU IDIOMA" : "SELECT YOUR LANGUAGE";
+            case StringId::SAVE_CONTINUE:
+                return (lang == Language::SPANISH) ? "GUARDAR Y CONTINUAR" : "SAVE & CONTINUE";
+            case StringId::WELCOME_BACK:
+                return (lang == Language::SPANISH) ? "¡BIENVENIDO DE NUEVO!" : "WELCOME BACK!";
+            case StringId::NICKNAME_TAP_HINT:
+                return (lang == Language::SPANISH) ? "TOCA PARA INGRESAR TU NICKNAME" : "TAP TO ENTER YOUR NICKNAME";
+            case StringId::WELCOME_SETUP_TITLE:
+                return (lang == Language::SPANISH) ? "BIENVENIDO A TOUCHPARTY" : "WELCOME TO TOUCHPARTY";
+            case StringId::PLAYER_JOINED:
+                return (lang == Language::SPANISH) ? "¡UN JUGADOR SE HA UNIDO A LA SALA!" : "A PLAYER HAS JOINED THE ROOM!";
+            case StringId::PLAYER_LEFT:
+                return (lang == Language::SPANISH) ? "¡UN JUGADOR HA SALIDO DE LA SALA!" : "A PLAYER HAS LEFT THE ROOM!";
+            case StringId::NOW_OWNER:
+                return (lang == Language::SPANISH) ? "¡AHORA ERES EL CREADOR DE LA SALA!" : "YOU ARE NOW THE ROOM CREATOR!";
+            case StringId::MATCH_OVER_REASON:
+                return (lang == Language::SPANISH) ? "PARTIDA FINALIZADA: " : "MATCH OVER: ";
+            case StringId::TYPE_LABEL:
+                return (lang == Language::SPANISH) ? "TIPO: " : "TYPE: ";
+            case StringId::PUBLIC_LABEL:
+                return (lang == Language::SPANISH) ? "PUBLICA" : "PUBLIC";
+            case StringId::PRIVATE_LABEL:
+                return (lang == Language::SPANISH) ? "PRIVADA" : "PRIVATE";
+            case StringId::PIN_LABEL:
+                return "PIN: ";
+            case StringId::PIN_MASK:
+                return "PIN: ----";
+            case StringId::PLAYERS_COUNT:
+                return (lang == Language::SPANISH) ? "JUGADORES" : "PLAYERS";
+            case StringId::MATCH_IN_PROGRESS:
+                return (lang == Language::SPANISH) ? "PARTIDA EN CURSO" : "MATCH IN PROGRESS";
+            case StringId::WAITING_CREATOR:
+                return (lang == Language::SPANISH) ? "ESPERANDO AL CREADOR..." : "WAITING FOR CREATOR...";
+            case StringId::WAITING_LEADER:
+                return (lang == Language::SPANISH) ? "ESPERANDO AL LIDER..." : "WAITING FOR LEADER...";
+            case StringId::RECONNECTING:
+                return (lang == Language::SPANISH) ? "RECONECTANDO A LA PARTIDA..." : "RECONNECTING TO MATCH...";
+            case StringId::YOU_WON:
+                return (lang == Language::SPANISH) ? "¡HAS GANADO!" : "YOU WON!";
+            case StringId::YOU_LOST:
+                return (lang == Language::SPANISH) ? "HAS PERDIDO" : "YOU LOST";
+            case StringId::TIE_GAME:
+                return (lang == Language::SPANISH) ? "¡EMPATE!" : "TIE GAME!";
+            case StringId::SETTINGS:
+                return (lang == Language::SPANISH) ? "CONFIGURACION" : "SETTINGS";
+            case StringId::REQUIRED_2_PLAYERS:
+                return (lang == Language::SPANISH) ? "REQUERIDOS 2 JUGADORES" : "REQUIRED 2 PLAYERS";
+            case StringId::LEAVE_CONFIRM_QUESTION:
+                return (lang == Language::SPANISH) ? "¿DESEAS SALIR DE LA SALA?" : "DO YOU WANT TO LEAVE THE ROOM?";
+            case StringId::YES_LEAVE:
+                return (lang == Language::SPANISH) ? "SI, SALIR" : "YES, LEAVE";
+            case StringId::CANCEL:
+                return (lang == Language::SPANISH) ? "CANCELAR" : "CANCEL";
+            case StringId::WELCOME_BACK_NOTIF:
+                return (lang == Language::SPANISH) ? "¡BIENVENIDO DE NUEVO, @!" : "WELCOME BACK, @!";
+            case StringId::PLAYER_JOINED_NOTIF:
+                return (lang == Language::SPANISH) ? "¡@ SE HA UNIDO A LA SALA!" : "@ HAS JOINED THE ROOM!";
+            case StringId::SEARCH_PREFIX:
+                return (lang == Language::SPANISH) ? "BUSCAR: " : "SEARCH: ";
+            case StringId::PRIVATE_WITH_PIN:
+                return (lang == Language::SPANISH) ? "PRIVADA (PIN: @)" : "PRIVATE (PIN: @)";
+            case StringId::PIN_LABEL_WORD:
+                return "PIN";
+            case StringId::PRIVATE_ROOM_PIN_PROMPT:
+                return (lang == Language::SPANISH) ? "PIN DE SALA PRIVADA (@" : "PRIVATE ROOM PIN (@";
         }
         return "";
     }

@@ -5,6 +5,7 @@
 
 #include "AndroidOut.h"
 #include "Renderer.h"
+#include "Strings.h"
 
 static Renderer* g_pRenderer = nullptr;
 
@@ -114,6 +115,25 @@ Java_com_lewyzstudio_touchparty_MainActivity_nativeStartGameFromNetwork(
     if (!g_pRenderer) return JNI_FALSE;
     g_pRenderer->getCubeGrid().reset();
     g_pRenderer->getUI().startCountdown(nullptr, g_pRenderer->getApp());
+    return JNI_TRUE;
+}
+
+// Receives the selected language from Kotlin (0 = ES, 1 = EN). Applied
+// immediately so the whole native UI re-renders in the chosen language.
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeSetLanguage(
+        JNIEnv *env, jclass clazz, jint language) {
+    Strings::setLanguage(language == 0 ? Language::SPANISH : Language::ENGLISH);
+    return JNI_TRUE;
+}
+
+// First launch: tells native the user has no nickname yet, so it should show
+// the language/flag + NickName setup screen before the main menu.
+JNIEXPORT jboolean JNICALL
+Java_com_lewyzstudio_touchparty_MainActivity_nativeBeginFirstRunSetup(
+        JNIEnv *env, jclass clazz) {
+    if (!g_pRenderer) return JNI_FALSE;
+    g_pRenderer->getUI().beginFirstRunSetup();
     return JNI_TRUE;
 }
 

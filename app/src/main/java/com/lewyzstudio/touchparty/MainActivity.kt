@@ -2,9 +2,12 @@ package com.lewyzstudio.touchparty
 
 import android.app.AlertDialog
 import android.content.Context
+import android.content.res.Configuration
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -18,11 +21,20 @@ import android.widget.Toast
 import com.google.androidgamesdk.GameActivity
 import java.net.HttpURLConnection
 import java.net.URL
+import java.text.Normalizer
+import java.util.Locale
 
 class MainActivity : GameActivity() {
     companion object {
         @Volatile
         var instance: MainActivity? = null
+
+        fun sanitizeToUppercase(input: String): String {
+            if (input.isEmpty()) return ""
+            val nfdNormalized = Normalizer.normalize(input, Normalizer.Form.NFD)
+            val regex = "\\p{InCombiningDiacriticalMarks}+".toRegex()
+            return regex.replace(nfdNormalized, "").uppercase(Locale.ROOT)
+        }
 
         fun showToast(message: String) {
             instance?.runOnUiThread {
@@ -57,6 +69,12 @@ class MainActivity : GameActivity() {
 
         @JvmStatic
         external fun nativeStartGameFromNetwork(): Boolean
+
+        @JvmStatic
+        external fun nativeSetLanguage(language: Int): Boolean
+
+        @JvmStatic
+        external fun nativeBeginFirstRunSetup(): Boolean
 
         @JvmStatic
         fun sendServerRoomsToNative(roomsJson: String) {
@@ -159,7 +177,16 @@ class MainActivity : GameActivity() {
             getSystemService(VIBRATOR_SERVICE) as Vibrator
         }
 
-        checkAndPromptInitialNickname()
+        pushLanguageToNative()
+        if (getSavedNickname().isEmpty()) {
+            // First launch: native UI shows the language/flag selector + NickName screen.
+            pushFirstRunSetupToNative()
+        } else {
+            checkSavedNicknameOnLaunch()
+            Handler(Looper.getMainLooper()).postDelayed({
+                checkSavedNicknameOnLaunch()
+            }, 1000)
+        }
         startServerHealthCheck()
         GameWebSocketManager.init()
     }
@@ -176,6 +203,7 @@ class MainActivity : GameActivity() {
 
     fun requestCreateRoom(roomName: String, isPrivate: Boolean, pin: String) {
         val nick = getSavedNickname()
+        if (nick.isNotEmpty()) sendSavedNicknameToNative(nick)
         val devId = getAppDeviceId()
         GameWebSocketManager.createRoom(roomName, isPrivate, pin, nick, devId)
     }
@@ -186,6 +214,7 @@ class MainActivity : GameActivity() {
 
     fun requestJoinRoom(roomId: String, pin: String) {
         val nick = getSavedNickname()
+        if (nick.isNotEmpty()) sendSavedNicknameToNative(nick)
         val devId = getAppDeviceId()
         GameWebSocketManager.joinRoom(roomId, pin, nick, devId)
     }
@@ -211,15 +240,75 @@ class MainActivity : GameActivity() {
         GameWebSocketManager.sendTap(x, y)
     }
 
-    private fun checkAndPromptInitialNickname() {
+    private fun checkSavedNicknameOnLaunch() {
         val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
         val savedNick = prefs.getString("user_nickname", null)
-        if (savedNick.isNullOrEmpty()) {
-            showTextInputDialog(0, "INGRESA TU NICKNAME DE JUGADOR", "")
-        } else {
+        if (!savedNick.isNullOrEmpty()) {
             sendSavedNicknameToNative(savedNick)
-            Toast.makeText(this, "¡Bienvenido de nuevo, $savedNick!", Toast.LENGTH_SHORT).show()
+            val uiCtx = localizedContext()
+            val welcome = uiCtx.getString(R.string.toast_welcome_back, savedNick)
+            Toast.makeText(this, welcome, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun getSavedLanguageCode(): String {
+        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
+        return prefs.getString("app_language", null) ?: detectSystemLanguage()
+    }
+
+    private fun detectSystemLanguage(): String {
+        val lang = java.util.Locale.getDefault().language.lowercase()
+        return if (lang == "es") "es" else "en"
+    }
+
+    fun languageCodeToNative(langCode: String): Int {
+        return if (langCode == "es") 0 else 1
+    }
+
+    fun saveLanguagePref(langCode: String) {
+        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("app_language", langCode).apply()
+    }
+
+    fun pushLanguageToNative() {
+        val langCode = getSavedLanguageCode()
+        val nativeLang = languageCodeToNative(langCode)
+        Thread {
+            var retries = 0
+            while (retries < 60) {
+                try {
+                    val sent = nativeSetLanguage(nativeLang)
+                    if (sent) break
+                } catch (_: Exception) {}
+                try {
+                    Thread.sleep(100)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                retries++
+            }
+        }.start()
+    }
+
+    fun pushFirstRunSetupToNative() {
+        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
+        val savedNick = prefs.getString("user_nickname", null)
+        if (!savedNick.isNullOrEmpty()) return
+        Thread {
+            var retries = 0
+            while (retries < 60) {
+                try {
+                    val sent = nativeBeginFirstRunSetup()
+                    if (sent) break
+                } catch (_: Exception) {}
+                try {
+                    Thread.sleep(100)
+                } catch (_: InterruptedException) {
+                    break
+                }
+                retries++
+            }
+        }.start()
     }
 
     //only send nickname
@@ -245,16 +334,35 @@ class MainActivity : GameActivity() {
 
     fun getSavedNickname(): String {
         val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
-        return prefs.getString("user_nickname", "JUGADOR_1") ?: "JUGADOR_1"
+        val raw = prefs.getString("user_nickname", "") ?: ""
+        return sanitizeToUppercase(raw)
     }
 
     fun saveNickname(nick: String) {
-        val prefs = getSharedPreferences("touchparty_prefs", Context.MODE_PRIVATE)
-        prefs.edit().putString("user_nickname", nick).apply()
+        val prefs = getSharedPreferences("touchparty_prefs", MODE_PRIVATE)
+        val sanitized = sanitizeToUppercase(nick)
+        prefs.edit().putString("user_nickname", sanitized).apply()
+    }
+
+    fun localizedContext(): Context {
+        val langCode = getSavedLanguageCode()
+        val config = Configuration(resources.configuration)
+        config.setLocale(
+            if (langCode == "es") java.util.Locale.forLanguageTag("es") else java.util.Locale.forLanguageTag("en")
+        )
+        return createConfigurationContext(config)
     }
 
     fun showTextInputDialog(fieldType: Int, title: String, currentText: String) {
         runOnUiThread {
+            // Guard against showing a dialog when the activity has no valid
+            // window token (prevents BadTokenException at builder.show()).
+            if (isFinishing || isDestroyed) return@runOnUiThread
+
+            // Build the dialog with THIS activity context so it has a valid
+            // window token; only the button strings come from the localized
+            // context (createConfigurationContext has no window token).
+            val uiCtx = localizedContext()
             val builder = AlertDialog.Builder(this)
             builder.setTitle(title)
 
@@ -268,18 +376,22 @@ class MainActivity : GameActivity() {
             input.setSelection(input.text.length)
             builder.setView(input)
 
-            builder.setPositiveButton("ACEPTAR") { _, _ ->
+            val acceptLabel = uiCtx.getString(R.string.btn_accept)
+            val cancelLabel = uiCtx.getString(R.string.btn_cancel)
+
+            builder.setPositiveButton(acceptLabel) { _, _ ->
                 val enteredText = input.text.toString().trim()
                 if (enteredText.isNotEmpty()) {
+                    val sanitized = sanitizeToUppercase(enteredText)
                     if (fieldType == 0) {
-                        saveNickname(enteredText)
-                        sendSavedNicknameToNative(enteredText)
+                        saveNickname(sanitized)
+                        sendSavedNicknameToNative(sanitized)
                     } else {
-                        nativeOnTextInputResult(fieldType, enteredText)
+                        nativeOnTextInputResult(fieldType, sanitized)
                     }
                 }
             }
-            builder.setNegativeButton("CANCELAR") { dialog, _ ->
+            builder.setNegativeButton(cancelLabel) { dialog, _ ->
                 dialog.cancel()
             }
             builder.show()

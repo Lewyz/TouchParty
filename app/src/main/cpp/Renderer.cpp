@@ -190,6 +190,8 @@ void Renderer::render() {
 
         // 2. Render 2D UI Overlay
         glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         gameUI_.render(*shader_, float(width_), float(height_), cubeGrid_.getRedCount(), cubeGrid_.getBlueCount());
 
         shader_->deactivate();
@@ -256,7 +258,7 @@ void Renderer::initRenderer() {
 
     auto assetManager = app_->activity->assetManager;
     bgTexture_ = TextureAsset::loadAsset(assetManager, "background_cubes.jpeg");
-    gameUI_.initFont(assetManager, "calculator.ttf");
+    gameUI_.initFont(assetManager, "press_start_2p.ttf");
     gameUI_.initCursorSprites(assetManager);
 
     glEnable(GL_BLEND);
