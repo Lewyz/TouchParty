@@ -17,22 +17,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           java-version: '21'
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Make gradlew executable
         run: chmod +x gradlew
 
-      - name: Accept Android Licenses & Pre-install NDK/CMake
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "cmake;3.22.1" "ndk-bundle" || true
+      - name: Accept Android SDK Licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Build Debug APK with Gradle
         run: ./gradlew assembleDebug --stacktrace
