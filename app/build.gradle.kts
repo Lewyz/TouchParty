@@ -16,7 +16,8 @@ val gameServerWsUrl = localProperties.getProperty("GAME_SERVER_WS_URL") ?: "wss:
 
 android {
     namespace = "com.lewyzstudio.touchparty"
-    compileSdk = 35
+    compileSdk = 37
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.lewyzstudio.touchparty"
