@@ -16,9 +16,9 @@ public:
                                    bool isConnected) {
         UIButtonSpec bannerSpec;
         bannerSpec.x = 0.0f;
-        bannerSpec.y = 0.85f;
+        bannerSpec.y = 0.91f;
         bannerSpec.w = 1.35f;
-        bannerSpec.h = 0.13f;
+        bannerSpec.h = 0.11f;
         bannerSpec.text = isConnected ? Strings::get(StringId::SERVER_CONNECTED) : Strings::get(StringId::SERVER_DISCONNECTED);
         bannerSpec.bgColor = isConnected ? UITheme::SERVER_CONNECTED_BG : UITheme::SERVER_DISCONNECTED_BG;
         bannerSpec.borderColor = isConnected ? UITheme::SERVER_CONNECTED_BORDER : UITheme::SERVER_DISCONNECTED_BORDER;

@@ -310,35 +310,58 @@ void Renderer::handleInput() {
             multiTouchGesture_ = true;
         }
 
+        // Pass motion event to GameUI for touch scrolling / gestures
+        gameUI_.handleMotionEvent(actionMasked, x, y, float(width_), float(height_));
+
         if (actionMasked == AMOTION_EVENT_ACTION_DOWN) {
-            // 1. Try handling touch on 2D Game UI (Play, Create, Join, Back, or Reset button)
-            TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_, app_);
+            if (gameUI_.getState() != GameState::ROOM_LIST) {
+                TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_, app_);
 
-            if (uiAction == TouchAction::CONFIRM_CREATE_ROOM) {
-                nativeWsRequestCreateRoom(app_, gameUI_.getRoomName(), gameUI_.isPrivateRoom(), gameUI_.getRoomPin());
-            } else if (uiAction == TouchAction::GOTO_ROOM_LIST || uiAction == TouchAction::REFRESH_ROOMS) {
-                nativeWsRequestListRooms(app_);
-            } else if (uiAction == TouchAction::JOIN_SELECTED_ROOM) {
-                nativeWsRequestJoinRoom(app_, gameUI_.getSelectedRoomId(), gameUI_.getRoomPin());
-            } else if (uiAction == TouchAction::RETURN_TO_ROOM_LOBBY) {
-                nativeWsRequestReturnToRoom(app_);
-            } else if (uiAction == TouchAction::CHANGE_TEAM) {
-                nativeWsRequestSetTeam(app_, gameUI_.getPendingTeam());
-            } else if (uiAction == TouchAction::LEAVE_ROOM_LOBBY || uiAction == TouchAction::BACK_TO_WELCOME) {
-                nativeWsRequestLeaveRoom(app_);
-            } else if (uiAction == TouchAction::START_MULTIPLAYER_GAME) {
-                nativeWsRequestStartGame(app_);
-            }
+                if (uiAction == TouchAction::CONFIRM_CREATE_ROOM) {
+                    nativeWsRequestCreateRoom(app_, gameUI_.getRoomName(), gameUI_.isPrivateRoom(), gameUI_.getRoomPin());
+                } else if (uiAction == TouchAction::GOTO_ROOM_LIST || uiAction == TouchAction::REFRESH_ROOMS) {
+                    nativeWsRequestListRooms(app_);
+                } else if (uiAction == TouchAction::JOIN_SELECTED_ROOM) {
+                    nativeWsRequestJoinRoom(app_, gameUI_.getSelectedRoomId(), gameUI_.getRoomPin());
+                } else if (uiAction == TouchAction::RETURN_TO_ROOM_LOBBY) {
+                    nativeWsRequestReturnToRoom(app_);
+                } else if (uiAction == TouchAction::CHANGE_TEAM) {
+                    nativeWsRequestSetTeam(app_, gameUI_.getPendingTeam());
+                } else if (uiAction == TouchAction::LEAVE_ROOM_LOBBY || uiAction == TouchAction::BACK_TO_WELCOME) {
+                    nativeWsRequestLeaveRoom(app_);
+                } else if (uiAction == TouchAction::START_MULTIPLAYER_GAME) {
+                    nativeWsRequestStartGame(app_);
+                }
 
-            if (uiAction == TouchAction::RESET || uiAction == TouchAction::START_LOCAL_GAME ||
-                uiAction == TouchAction::CONFIRM_CREATE_ROOM || uiAction == TouchAction::JOIN_SELECTED_ROOM ||
-                uiAction == TouchAction::PLAY) {
-                if (gameUI_.getState() == GameState::COUNTDOWN || gameUI_.getState() == GameState::PLAYING) {
-                    cubeGrid_.reset();
-                    particleSystem_.clear();
+                if (uiAction == TouchAction::RESET || uiAction == TouchAction::START_LOCAL_GAME ||
+                    uiAction == TouchAction::CONFIRM_CREATE_ROOM || uiAction == TouchAction::JOIN_SELECTED_ROOM ||
+                    uiAction == TouchAction::PLAY) {
+                    if (gameUI_.getState() == GameState::COUNTDOWN || gameUI_.getState() == GameState::PLAYING) {
+                        cubeGrid_.reset();
+                        particleSystem_.clear();
+                    }
                 }
             }
         } else if (actionMasked == AMOTION_EVENT_ACTION_UP) {
+            if (gameUI_.getState() == GameState::ROOM_LIST) {
+                TouchAction uiAction = gameUI_.handleTouch(x, y, float(width_), float(height_), &audioEngine_, app_);
+
+                if (uiAction == TouchAction::CONFIRM_CREATE_ROOM) {
+                    nativeWsRequestCreateRoom(app_, gameUI_.getRoomName(), gameUI_.isPrivateRoom(), gameUI_.getRoomPin());
+                } else if (uiAction == TouchAction::GOTO_ROOM_LIST || uiAction == TouchAction::REFRESH_ROOMS) {
+                    nativeWsRequestListRooms(app_);
+                } else if (uiAction == TouchAction::JOIN_SELECTED_ROOM) {
+                    nativeWsRequestJoinRoom(app_, gameUI_.getSelectedRoomId(), gameUI_.getRoomPin());
+                } else if (uiAction == TouchAction::RETURN_TO_ROOM_LOBBY) {
+                    nativeWsRequestReturnToRoom(app_);
+                } else if (uiAction == TouchAction::CHANGE_TEAM) {
+                    nativeWsRequestSetTeam(app_, gameUI_.getPendingTeam());
+                } else if (uiAction == TouchAction::LEAVE_ROOM_LOBBY || uiAction == TouchAction::BACK_TO_WELCOME) {
+                    nativeWsRequestLeaveRoom(app_);
+                } else if (uiAction == TouchAction::START_MULTIPLAYER_GAME) {
+                    nativeWsRequestStartGame(app_);
+                }
+            }
             // A cube is captured only when a complete gesture had exactly one
             // pointer. Multi-touch gestures are intentionally ignored.
             if (!multiTouchGesture_ && gameUI_.getState() == GameState::PLAYING && gameUI_.isServerConnected()) {

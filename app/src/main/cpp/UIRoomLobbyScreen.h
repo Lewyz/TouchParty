@@ -49,9 +49,10 @@ public:
         float leftX = -cardW * 0.25f;
         float rightX = cardW * 0.25f;
         float teamBoxW = std::min(1.15f, cardW * 0.44f);
-        float teamHeaderY = 0.32f;
-        float rowStartY = 0.22f;
-        float rowH = 0.12f;
+        float teamHeaderY = 0.36f;
+        float rowStartY = 0.18f;
+        float rowH = 0.11f;
+        float rowStep = 0.15f;
 
         auto renderTeamColumn = [&](const std::string& team, float x, float r, float g, float b) {
             UIDrawHelpers::drawQuad(shader, ortho, x, teamHeaderY, teamBoxW, 0.025f, r, g, b, 0.95f);
@@ -59,7 +60,7 @@ public:
             size_t rowIndex = 0;
             for (const auto& player : currentRoomPlayers) {
                 if (player.team != team || rowIndex >= 4) continue;
-                float rowY = rowStartY - static_cast<float>(rowIndex) * 0.14f;
+                float rowY = rowStartY - static_cast<float>(rowIndex) * rowStep;
 
                 ColorRGBA rowBg = UITheme::TEAM_ROW_BG;
                 ColorRGBA ownerBorder = UITheme::OWNER_BORDER;
@@ -94,6 +95,14 @@ public:
         renderTeamColumn("BLUE", leftX, 0.20f, 0.75f, 1.0f);
         renderTeamColumn("RED", rightX, 1.0f, 0.30f, 0.30f);
 
+        // Check if there are opposing teams (at least 1 player in BLUE and 1 player in RED)
+        bool hasBlue = false, hasRed = false;
+        for (const auto& player : currentRoomPlayers) {
+            if (player.team == "BLUE") hasBlue = true;
+            if (player.team == "RED") hasRed = true;
+        }
+        bool hasOpposingTeams = hasBlue && hasRed;
+
         // Player count bar
         float countY = -0.32f;
         UIButtonSpec countSpec;
@@ -124,12 +133,19 @@ public:
             startSpec.borderColor = UITheme::CARD_BORDER_CYAN;
             startSpec.textColor = ColorRGBA(1.0f, 0.75f, 0.20f, 1.0f);
             startSpec.fontSize = 0.100f;
-        } else if (isOwner && connectedPlayerCount >= 2) {
+        } else if (isOwner && connectedPlayerCount >= 2 && hasOpposingTeams) {
             startSpec.text = Strings::get(StringId::LOBBY_START_MATCH) + " (" + std::to_string(connectedPlayerCount) + "/8)";
             startSpec.bgColor = UITheme::BTN_SUCCESS_BG;
             startSpec.borderColor = UITheme::BTN_SUCCESS_BORDER;
             startSpec.textColor = UITheme::TEXT_WHITE;
             startSpec.fontSize = 0.105f;
+        } else if (isOwner && connectedPlayerCount >= 2 && !hasOpposingTeams) {
+            startSpec.w = requiredW;
+            startSpec.text = Strings::get(StringId::NEED_OPPOSING_TEAMS);
+            startSpec.bgColor = ColorRGBA(0.18f, 0.16f, 0.08f, 0.95f);
+            startSpec.borderColor = ColorRGBA(0.95f, 0.75f, 0.20f, 1.0f);
+            startSpec.textColor = ColorRGBA(1.0f, 0.85f, 0.30f, 1.0f);
+            startSpec.fontSize = 0.092f;
         } else if (isOwner) {
             startSpec.w = requiredW;
             startSpec.text = Strings::get(StringId::LOBBY_REQUIRED_PLAYERS);
@@ -144,6 +160,7 @@ public:
             startSpec.textColor = ColorRGBA(0.90f, 0.95f, 1.0f, 1.0f);
             startSpec.fontSize = 0.096f;
         }
+        UIButton::render(shader, ortho, fontRenderer, startSpec);
         UIButton::render(shader, ortho, fontRenderer, startSpec);
 
         // SALIR DE SALA Button

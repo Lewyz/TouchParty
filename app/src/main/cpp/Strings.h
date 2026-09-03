@@ -79,7 +79,12 @@ enum class StringId {
     SEARCH_PREFIX,
     PRIVATE_WITH_PIN,
     PIN_LABEL_WORD,
-    PRIVATE_ROOM_PIN_PROMPT
+    PRIVATE_ROOM_PIN_PROMPT,
+    SERVER_BROWSER,
+    LOBBIES_HEADER,
+    SEARCH_LABEL,
+    FULL_BADGE,
+    NEED_OPPOSING_TEAMS
 };
 
 class Strings {
@@ -240,6 +245,16 @@ public:
                 return "PIN";
             case StringId::PRIVATE_ROOM_PIN_PROMPT:
                 return (lang == Language::SPANISH) ? "PIN DE SALA PRIVADA (@" : "PRIVATE ROOM PIN (@";
+            case StringId::SERVER_BROWSER:
+                return (lang == Language::SPANISH) ? "BUSCADOR DE SALAS" : "SERVER BROWSER";
+            case StringId::LOBBIES_HEADER:
+                return (lang == Language::SPANISH) ? "SALAS" : "LOBBIES";
+            case StringId::SEARCH_LABEL:
+                return (lang == Language::SPANISH) ? "BUSCAR" : "SEARCH";
+            case StringId::FULL_BADGE:
+                return (lang == Language::SPANISH) ? "[LLENO]" : "[FULL]";
+            case StringId::NEED_OPPOSING_TEAMS:
+                return (lang == Language::SPANISH) ? "REQUERIDOS EN AMBOS EQUIPOS" : "NEED PLAYERS IN BOTH TEAMS";
         }
         return "";
     }

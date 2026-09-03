@@ -28,6 +28,7 @@
 #include "UILanguageScreen.h"
 #include "UIInGameOverlay.h"
 #include "GameUIStructs.h"
+#include "UIScrollContainer.h"
 #include "Strings.h"
 
 enum class GameState {
@@ -94,7 +95,6 @@ public:
           connectedPlayerCount_(1),
           isOwner_(false),
           filterTypeIndex_(0),
-          roomListScrollOffset_(0),
           joinNotificationTimer_(0.0f),
           showLeaveConfirmModal_(false),
           leaveModalFromMatch_(false),
@@ -104,7 +104,8 @@ public:
           myTeam_("BLUE"),
           pendingJoinRoom_(false),
           reconnectTimer_(0.0f),
-          languagePanelOpen_(false) {
+          languagePanelOpen_(false),
+          searchQuery_("") {
         initQuadGeometry();
         initMiniCubeGeometry();
         serverRooms_.clear();
@@ -254,6 +255,11 @@ public:
     }
 
     void onTextInputResult(int fieldType, const std::string& text) {
+        if (fieldType == 4) {
+            searchQuery_ = sanitizeToUppercase(text);
+            scrollContainer_.resetScroll();
+            return;
+        }
         if (text.empty()) return;
         std::string sanitized = sanitizeToUppercase(text);
         if (fieldType == 0) {
@@ -282,7 +288,7 @@ public:
 
     void setServerRooms(const std::vector<ServerRoomEntry>& rooms) {
         serverRooms_ = rooms;
-        roomListScrollOffset_ = 0;
+        scrollContainer_.resetScroll();
     }
 
     void setServerRoomsJson(const std::string& jsonRooms) {
@@ -331,7 +337,7 @@ public:
             }
             pos = endPos + 1;
         }
-        roomListScrollOffset_ = 0;
+        scrollContainer_.resetScroll();
     }
 
     void onRoomJoined(const std::string& roomId, bool isOwner, const std::string& team = "BLUE") {
@@ -496,6 +502,32 @@ public:
         }
     }
 
+    void handleMotionEvent(int actionMasked, float screenX, float screenY, float width, float height) {
+        if (state_ != GameState::ROOM_LIST) return;
+
+        float aspect = width / height;
+        float normX = ((2.0f * screenX) / width - 1.0f) * aspect;
+        float normY = 1.0f - (2.0f * screenY) / height;
+
+        float cardW = std::min(2.70f, aspect * 1.85f);
+        float boxX = -0.02f;
+        float boxY = -0.09f;
+        float boxW = cardW - 0.32f;
+        float boxH = 0.66f;
+
+        auto filtered = getFilteredRooms();
+        float contentH = static_cast<float>(filtered.size()) * 0.15f;
+        scrollContainer_.setContentAndViewportHeight(contentH, boxH);
+
+        if (actionMasked == 0 /* AMOTION_EVENT_ACTION_DOWN */) {
+            scrollContainer_.onTouchDown(normX, normY, boxX, boxY, boxW, boxH);
+        } else if (actionMasked == 2 /* AMOTION_EVENT_ACTION_MOVE */) {
+            scrollContainer_.onTouchMove(normX, normY);
+        } else if (actionMasked == 1 /* AMOTION_EVENT_ACTION_UP */) {
+            scrollContainer_.onTouchUp();
+        }
+    }
+
     TouchAction handleTouch(float screenX, float screenY, float width, float height, AudioEngine* audioEngine = nullptr, android_app* app = nullptr) {
         float aspect = width / height;
         float normX = ((2.0f * screenX) / width - 1.0f) * aspect;
@@ -622,6 +654,7 @@ public:
             float leftX = -0.42f;
             if (UIButton::contains(normX, normY, leftX, btnY, btnW, btnH)) {
                 state_ = GameState::ROOM_LIST;
+                scrollContainer_.resetScroll();
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::GOTO_ROOM_LIST;
             }
@@ -682,10 +715,18 @@ public:
         // 5. ROOM LOBBY Screen Touch
         else if (state_ == GameState::ROOM_LOBBY) {
             float lobbyCardW = std::min(2.65f, aspect * 1.85f);
-            float startX = 0.0f, startY = -0.40f, startW = 0.90f, startH = 0.18f;
-            if (std::abs(normX - startX) <= startW * 0.5f + 0.04f &&
+            float startX = 0.0f, startY = -0.54f, startW = 1.15f, startH = 0.18f;
+
+            bool hasBlue = false, hasRed = false;
+            for (const auto& player : currentRoomPlayers_) {
+                if (player.team == "BLUE") hasBlue = true;
+                if (player.team == "RED") hasRed = true;
+            }
+            bool hasOpposing = hasBlue && hasRed;
+
+            if (std::abs(normX - startX) <= startW * 0.5f + 0.25f &&
                 std::abs(normY - startY) <= startH * 0.5f + 0.04f) {
-                if (isOwner_ && !roomMatchActive_ && connectedPlayerCount_ >= 2) {
+                if (isOwner_ && !roomMatchActive_ && connectedPlayerCount_ >= 2 && hasOpposing) {
                     if (audioEngine) audioEngine->playCountdownBeep();
                     return TouchAction::START_MULTIPLAYER_GAME;
                 } else {
@@ -697,13 +738,14 @@ public:
             float leftX = -lobbyCardW * 0.25f;
             float rightX = lobbyCardW * 0.25f;
             float teamBoxW = std::min(1.15f, lobbyCardW * 0.44f);
-            float rowStartY = 0.14f;
+            float rowStartY = 0.18f;
+            float rowStep = 0.15f;
             size_t blueIndex = 0;
             size_t redIndex = 0;
             for (const auto& player : currentRoomPlayers_) {
                 bool isRed = player.team == "RED";
                 size_t rowIndex = isRed ? redIndex++ : blueIndex++;
-                float rowY = rowStartY - static_cast<float>(rowIndex) * 0.14f;
+                float rowY = rowStartY - static_cast<float>(rowIndex) * rowStep;
                 float arrowX = isRed ? rightX - teamBoxW * 0.5f + 0.10f : leftX + teamBoxW * 0.5f - 0.10f;
                 float arrowY = rowY - 0.005f;
                 if (player.isLocal && !roomMatchActive_ && std::abs(normX - arrowX) <= 0.10f && std::abs(normY - arrowY) <= 0.08f) {
@@ -722,62 +764,101 @@ public:
         }
         // 6. ROOM LIST Screen Touch
         else if (state_ == GameState::ROOM_LIST) {
-            float toolY = 0.28f, toolH = 0.14f;
-            float filterX = -0.45f, filterW = 1.15f;
+            float cardW = std::min(2.70f, aspect * 1.85f);
+
+            // If user was dragging/swiping the list, do not click items
+            if (scrollContainer_.wasDragged()) {
+                return TouchAction::NONE;
+            }
+
+            // 1. Toolbar Search Input Field Box (Left)
+            const float toolY = 0.48f, toolH = 0.12f;
+            const float searchW = cardW * 0.48f;
+            const float searchX = -0.02f - (cardW * 0.5f) + (searchW * 0.5f) + 0.08f;
+
+            if (UIButton::contains(normX, normY, searchX, toolY, searchW, toolH)) {
+                triggerNativeTextInput(app, 4, Strings::get(StringId::SEARCH_ROOMS), searchQuery_);
+                if (audioEngine) audioEngine->playCountdownBeep();
+                return TouchAction::EDIT_ROOM_NAME;
+            }
+
+            // 1b. Clear Search Button [X] (Middle)
+            const float clearW = 0.13f;
+            const float clearX = searchX + (searchW * 0.5f) + (clearW * 0.5f) + 0.02f;
+
+            if (UIButton::contains(normX, normY, clearX, toolY, clearW, toolH)) {
+                searchQuery_ = "";
+                scrollContainer_.resetScroll();
+                if (audioEngine) audioEngine->playCountdownBeep();
+                return TouchAction::EDIT_ROOM_NAME;
+            }
+
+            // 2. Toolbar Filter Selector [ALL, PUBLIC, PRIVATE] (Right)
+            const float filterW = cardW * 0.28f;
+            const float filterX = -0.02f + (cardW * 0.5f) - (filterW * 0.5f) - 0.08f;
 
             if (UIButton::contains(normX, normY, filterX, toolY, filterW, toolH)) {
                 filterTypeIndex_ = (filterTypeIndex_ + 1) % 3;
-                roomListScrollOffset_ = 0;
+                scrollContainer_.resetScroll();
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::CYCLE_FILTER;
             }
 
-            float scrollX = 0.75f, btnW = 0.32f, btnH = 0.13f;
-            float upY = 0.28f, downY = 0.12f;
+            // 3. Room List Items Click Handling
+            const float boxX = -0.02f;
+            const float boxY = -0.09f;
+            const float boxW = cardW - 0.32f;
+            const float boxH = 0.66f;
 
-            if (UIButton::contains(normX, normY, scrollX, upY, btnW, btnH)) {
-                roomListScrollOffset_ = std::max(0, roomListScrollOffset_ - 1);
-                if (audioEngine) audioEngine->playCountdownBeep();
-                return TouchAction::SCROLL_UP_ROOMS;
-            }
-            if (UIButton::contains(normX, normY, scrollX, downY, btnW, btnH)) {
-                roomListScrollOffset_++;
-                if (audioEngine) audioEngine->playCountdownBeep();
-                return TouchAction::SCROLL_DOWN_ROOMS;
-            }
+            if (normY >= boxY - boxH * 0.5f && normY <= boxY + boxH * 0.5f) {
+                auto filtered = getFilteredRooms();
+                const float itemH = 0.13f;
+                const float rowStep = 0.15f;
+                const float scrollOffset = scrollContainer_.getScrollOffset();
 
-            auto filtered = getFilteredRooms();
-            float joinX = 0.65f, joinW = 0.38f, joinH = 0.15f;
-            float startY = 0.05f;
+                for (size_t i = 0; i < filtered.size(); ++i) {
+                    const auto& room = filtered[i];
+                    float rowY = (boxY + boxH * 0.5f - itemH * 0.5f - 0.015f) - (static_cast<float>(i) * rowStep) + scrollOffset;
 
-            for (size_t i = 0; i < 3 && (i + roomListScrollOffset_) < filtered.size(); ++i) {
-                float rowY = startY - static_cast<float>(i) * 0.17f;
-                if (UIButton::contains(normX, normY, joinX, rowY, joinW, joinH)) {
-                    const auto& room = filtered[i + roomListScrollOffset_];
-                    selectedRoomId_ = room.id;
-                    roomName_ = room.name;
-                    isPrivateRoom_ = room.isPrivate;
+                    if (rowY + itemH * 0.5f < boxY - boxH * 0.5f || rowY - itemH * 0.5f > boxY + boxH * 0.5f) {
+                        continue;
+                    }
 
-                    if (room.isPrivate) {
-                        triggerNativeTextInput(app, 3,
-                            fillTemplate(Strings::get(StringId::PRIVATE_ROOM_PIN_PROMPT), room.name) + ":",
-                            "");
-                        if (audioEngine) audioEngine->playCountdownBeep();
-                        return TouchAction::EDIT_PIN;
-                    } else {
-                        roomPin_ = "";
-                        if (audioEngine) audioEngine->playCountdownBeep();
-                        return TouchAction::JOIN_SELECTED_ROOM;
+                    if (UIButton::contains(normX, normY, boxX, rowY, boxW, itemH)) {
+                        // If FULL (playerCount >= maxPlayers), ignore click
+                        if (room.playerCount >= room.maxPlayers) {
+                            if (audioEngine) audioEngine->playCountdownBeep();
+                            return TouchAction::NONE;
+                        }
+
+                        selectedRoomId_ = room.id;
+                        roomName_ = room.name;
+                        isPrivateRoom_ = room.isPrivate;
+
+                        if (room.isPrivate) {
+                            triggerNativeTextInput(app, 3,
+                                fillTemplate(Strings::get(StringId::PRIVATE_ROOM_PIN_PROMPT), room.name) + ":",
+                                "");
+                            if (audioEngine) audioEngine->playCountdownBeep();
+                            return TouchAction::EDIT_PIN;
+                        } else {
+                            roomPin_ = "";
+                            if (audioEngine) audioEngine->playCountdownBeep();
+                            return TouchAction::JOIN_SELECTED_ROOM;
+                        }
                     }
                 }
             }
 
-            float refX = 0.0f, refY = -0.50f, refW = 0.85f, refH = 0.16f;
+            // 4. REFRESH Button
+            float refX = 0.0f, refY = -0.52f, refW = 0.85f, refH = 0.15f;
             if (UIButton::contains(normX, normY, refX, refY, refW, refH)) {
+                scrollContainer_.resetScroll();
                 if (audioEngine) audioEngine->playCountdownBeep();
                 return TouchAction::REFRESH_ROOMS;
             }
 
+            // 5. VOLVER Button
             if (UIDrawHelpers::isBackButtonClicked(normX, normY, aspect)) {
                 state_ = GameState::WELCOME;
                 if (audioEngine) audioEngine->playCountdownBeep();
@@ -843,7 +924,7 @@ public:
                                      currentRoomPlayers_, arrowBlueLeftTexture_, arrowBlueRightTexture_,
                                      arrowRedLeftTexture_, arrowRedRightTexture_);
         } else if (state_ == GameState::ROOM_LIST) {
-            UIRoomListScreen::render(shader, ortho, aspect, fontRenderer_, filterTypeIndex_, roomListScrollOffset_, getFilteredRooms());
+            UIRoomListScreen::render(shader, ortho, aspect, width, height, fontRenderer_, filterTypeIndex_, searchQuery_, scrollContainer_, getFilteredRooms());
         } else if (state_ == GameState::COUNTDOWN) {
             UIInGameOverlay::renderCountdown(shader, ortho, fontRenderer_, countdownTimer_);
         } else if (state_ == GameState::MATCH_OVER) {
@@ -906,9 +987,20 @@ private:
 
     [[nodiscard]] std::vector<ServerRoomEntry> getFilteredRooms() const {
         std::vector<ServerRoomEntry> res;
+        std::string queryUpper = searchQuery_;
+        std::transform(queryUpper.begin(), queryUpper.end(), queryUpper.begin(), ::toupper);
+
         for (const auto& room : serverRooms_) {
             if (filterTypeIndex_ == 1 && room.isPrivate) continue;
             if (filterTypeIndex_ == 2 && !room.isPrivate) continue;
+
+            if (!queryUpper.empty()) {
+                std::string roomNameUpper = room.name;
+                std::transform(roomNameUpper.begin(), roomNameUpper.end(), roomNameUpper.begin(), ::toupper);
+                if (roomNameUpper.find(queryUpper) == std::string::npos) {
+                    continue;
+                }
+            }
             res.push_back(room);
         }
         return res;
@@ -982,7 +1074,6 @@ private:
     bool isOwner_;
     std::string ownerId_;
     size_t filterTypeIndex_;
-    int roomListScrollOffset_;
     std::vector<ServerRoomEntry> serverRooms_;
     std::vector<PlayerInfo> currentRoomPlayers_;
     std::string joinNotificationText_;
@@ -995,6 +1086,8 @@ private:
     std::string myTeam_;
     float reconnectTimer_;
     bool languagePanelOpen_;
+    std::string searchQuery_;
+    UIScrollContainer scrollContainer_;
 
     FontRenderer fontRenderer_;
     std::shared_ptr<TextureAsset> arrowRedLeftTexture_;

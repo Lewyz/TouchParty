@@ -120,3 +120,47 @@
 - Archivos modificados: `MainActivity.kt`, `UICreateRoomScreen.h`, `GameUI.h`, `history/SEPTIEMBRE_JUEVES_03_2026.md`.
 - Verificación: Compilación Gradle `:app:assembleDebug` exitosa para las 4 ABIs y confirmación visual en celular físico enviada por el usuario (`Testeado`).
 - Estado: Testeado
+
+## CHG-031 — Rediseño del Buscador de Salas (SERVER BROWSER), Búsqueda Local, Indicador [FULL] en rojo y Desplazamiento Táctil
+- Inicio: 2026-09-03 02:35:00 -06:00
+- Entrega: 2026-09-03 02:48:00 -06:00
+- Duración de implementación: ~13 minutos
+- Testeado: Sí
+- Hora de prueba final: 2026-09-03 03:15:00 -06:00
+- Prompt: Rediseño del Buscador de Salas (`SERVER BROWSER`), sub-encabezado `LOBBIES`, barra de búsqueda local por texto (`BUSCAR | ...`), selector de filtro `[ALL, PUBLIC, PRIVATE]`, indicador `[FULL]` en rojo para salas llenas (8/8) y clase dedicada `UIScrollContainer.h` para desplazamiento táctil por arrastre y barra de scroll.
+- Archivos modificados: `UIScrollContainer.h`, `Strings.h`, `UIRoomListScreen.h`, `GameUI.h`, `Renderer.cpp`.
+- Verificación: Compilación nativa Gradle `:app:assembleDebug` exitosa para las 4 ABIs y confirmación visual recibida del usuario (`Testeado`).
+- Estado: Testeado
+
+## CHG-032 — Ajuste de layout: centrado de LOBBIES, elevación de barra de búsqueda y respuesta sobre la barra de scroll
+- Inicio: 2026-09-03 03:00:00 -06:00
+- Entrega: 2026-09-03 03:08:00 -06:00
+- Duración de implementación: ~8 minutos
+- Testeado: Sí
+- Hora de prueba final: 2026-09-03 03:15:00 -06:00
+- Prompt: Centrar el texto `LOBBIES` horizontalmente en el panel, subir la barra de búsqueda `SEARCH | ...` y el filtro `[ALL, PUBLIC, PRIVATE]` lo más alto posible en el panel con margen respecto al borde superior para evitar solapamientos, y responder sobre la visibilidad dinámica de la barra de scroll.
+- Archivos modificados: `UIRoomListScreen.h`, `GameUI.h`.
+- Verificación: Compilación Gradle `:app:assembleDebug` exitosa para las 4 ABIs y confirmación visual recibida del usuario (`Testeado`).
+- Estado: Testeado
+
+## CHG-033 — Elevar banner SERVER CONNECTED y agregar botón [X] para limpiar búsqueda
+- Inicio: 2026-09-03 03:16:00 -06:00
+- Entrega: 2026-09-03 03:24:00 -06:00
+- Duración de implementación: ~8 minutos
+- Testeado: Sí
+- Hora de prueba final: 2026-09-03 03:30:00 -06:00
+- Prompt: Subir un poco más el banner `SERVER: CONNECTED` para evitar solapamiento con el borde superior de la tarjeta `SERVER BROWSER` y agregar el botón `[X]` de limpiado al final de la barra de búsqueda para borrar el texto y restaurar todo el listado de salas.
+- Archivos modificados: `UIBanner.h`, `UIRoomListScreen.h`, `GameUI.h`.
+- Verificación: Compilación Gradle `:app:assembleDebug` exitosa para las 4 ABIs y confirmación visual recibida del usuario (`Testeado`).
+- Estado: Testeado
+
+## CHG-034 — Posicionar botón [X] a la derecha, margen inferior para LOBBIES, separación vertical de filas en Lobby y restricción de equipos distintos para INICIAR PARTIDA
+- Inicio: 2026-09-03 03:31:00 -06:00
+- Entrega: 2026-09-03 03:42:00 -06:00
+- Duración de implementación: ~11 minutos
+- Testeado: Sí
+- Hora de prueba final: 2026-09-03 03:45:00 -06:00
+- Prompt: Posicionar el botón `[X]` más a la derecha sin encimarse en `SEARCH`, añadir margen inferior para separar `LOBBIES` de la lista de salas, aumentar margen superior y separación vertical entre filas de jugadores en el Lobby para evitar superposición de bordes, y exigir la presencia de jugadores en ambos equipos (`BLUE` y `RED`) para habilitar el botón `INICIAR PARTIDA`.
+- Archivos modificados: `Strings.h`, `UIRoomListScreen.h`, `UIRoomLobbyScreen.h`, `GameUI.h`.
+- Verificación: Compilación Gradle `:app:assembleDebug` exitosa para las 4 ABIs y confirmación visual recibida del usuario (`Testing`/`Testeado`).
+- Estado: Testeado
